@@ -29,7 +29,7 @@
         onclick={() => (color = p.hex)}
       >
         <!-- An SVG fill rather than a style attribute: the page's CSP forbids inline styles. -->
-        <svg viewBox="0 0 10 10" preserveAspectRatio="none" aria-hidden="true"><rect width="10" height="10" fill={p.hex} /></svg>
+        <svg viewBox="0 0 10 10" preserveAspectRatio="none" aria-hidden="true"><rect x="-1" y="-1" width="12" height="12" fill={p.hex} /></svg>
       </button>
     {/each}
     <label class={["swatch", "custom", { selected: isCustom }]} title="Pick any colour">
