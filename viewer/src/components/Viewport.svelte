@@ -39,20 +39,29 @@
   <span class="mark bl" aria-hidden="true"></span>
   <span class="mark br" aria-hidden="true"></span>
 
-  <ul class="hint">
-    <li><kbd>Drag</kbd> rotate</li>
-    <li><kbd>Scroll</kbd> zoom</li>
-    <li><kbd>Right-drag</kbd> pan</li>
-  </ul>
-
-  {#if mesh}
-    {#if grid}
+  <!-- Top-right annotations, like the legend of a drawing: how to move, and which arrow is which axis. -->
+  <div class="legend">
+    <ul class="hint">
+      <li><kbd>Drag</kbd> rotate</li>
+      <li><kbd>Scroll</kbd> zoom</li>
+      <li><kbd>Right-drag</kbd> pan</li>
+    </ul>
+    {#if mesh && grid}
       <ul class="axes" aria-label="Axis colours">
-        <li class="x">X</li>
-        <li class="y">Y</li>
-        <li class="z">Z</li>
+        {#each ["x", "y", "z"] as axis (axis)}
+          <li class={axis}>
+            <svg width="24" height="10" viewBox="0 0 24 10" aria-hidden="true">
+              <rect y="3.5" width="16" height="3" fill="currentColor" />
+              <polygon points="15,0 24,5 15,10" fill="currentColor" />
+            </svg>
+            {axis.toUpperCase()}
+          </li>
+        {/each}
       </ul>
     {/if}
+  </div>
+
+  {#if mesh}
     <Controls bind:edges bind:wireframe bind:autoRotate bind:grid onreset={() => scene.resetView()} />
   {:else}
     <div class="empty">
@@ -78,17 +87,25 @@
   .bl { bottom: 12px; left: 12px; border-width: 0 0 2px 2px; }
   .br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; }
 
-  .hint {
+  .legend {
     position: absolute;
     top: 22px;
+    right: 40px;
     left: 40px;
     display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    pointer-events: none;
+  }
+  .hint {
+    display: flex;
     flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 4px 14px;
     list-style: none;
     color: var(--ink-soft);
     font-size: 12px;
-    pointer-events: none;
   }
   kbd {
     margin-right: 3px;
@@ -100,21 +117,11 @@
     color: var(--ink);
   }
 
-  .axes {
-    position: absolute;
-    top: 22px;
-    right: 40px;
-    display: flex;
-    gap: 12px;
-    list-style: none;
-    font: 500 11px var(--font-mono);
-    pointer-events: none;
-  }
+  .axes { display: flex; gap: 14px; list-style: none; font: 500 11px var(--font-mono); }
   .axes li { display: flex; align-items: center; gap: 5px; }
-  .axes li::before { content: ""; width: 16px; height: 3px; }
-  .x::before { background: var(--axis-x); }
-  .y::before { background: var(--axis-y); }
-  .z::before { background: var(--axis-z); }
+  .x svg { color: var(--axis-x); }
+  .y svg { color: var(--axis-y); }
+  .z svg { color: var(--axis-z); }
 
   .empty {
     position: absolute;

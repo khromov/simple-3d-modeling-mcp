@@ -4,19 +4,22 @@
  */
 
 import {
-  AxesHelper,
   BufferAttribute,
   BufferGeometry,
   Color,
+  ConeGeometry,
+  CylinderGeometry,
   DirectionalLight,
   DoubleSide,
   EdgesGeometry,
   GridHelper,
+  Group,
   HemisphereLight,
   LineBasicMaterial,
   LineSegments,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshPhongMaterial,
   Object3D,
   PerspectiveCamera,
@@ -49,6 +52,36 @@ const THEMES = {
   },
 } as const;
 
+/** Per axis: the solid arrow, and its "hidden line" twin that shows faintly through the model. */
+interface AxisMaterials {
+  solid: MeshBasicMaterial;
+  hidden: MeshBasicMaterial;
+}
+
+/**
+ * X, Y and Z arrows of unit length (scaled to each model): a shaft and a cone
+ * tip each, flat-coloured like ink. Lines would be 1px wide on most GPUs.
+ * Where the model is in front of an arrow, its hidden twin draws it faintly,
+ * as a technical drawing shows hidden edges.
+ */
+function buildAxes(materials: AxisMaterials[]): Group {
+  const shaft = new CylinderGeometry(0.009, 0.009, 0.86, 12).translate(0, 0.43, 0); // along +Y
+  const tip = new ConeGeometry(0.035, 0.14, 20).translate(0, 0.93, 0);
+  const group = new Group();
+  // Turn +Y onto +X, +Y and +Z.
+  [[0, 0, -Math.PI / 2], [0, 0, 0], [Math.PI / 2, 0, 0]].forEach(([x, y, z], i) => {
+    for (const geometry of [shaft, tip]) {
+      for (const material of [materials[i].solid, materials[i].hidden]) {
+        const arrow = new Mesh(geometry, material);
+        arrow.rotation.set(x, y, z);
+        group.add(arrow);
+      }
+    }
+  });
+  group.visible = false;
+  return group;
+}
+
 export class ViewerScene {
   readonly #scene = new Scene();
   readonly #camera = new PerspectiveCamera(40, 1, 0.1, 10000);
@@ -62,6 +95,12 @@ export class ViewerScene {
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, // keep edge lines on top
   });
   readonly #edgeMaterial = new LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 });
+  readonly #axisMaterials: AxisMaterials[] = [0, 1, 2].map(() => ({
+    solid: new MeshBasicMaterial(),
+    // Transparent, so it draws after the model; without a depth test, it shows through it.
+    hidden: new MeshBasicMaterial({ transparent: true, opacity: 0.3, depthTest: false, depthWrite: false }),
+  }));
+  readonly #axes = buildAxes(this.#axisMaterials);
 
   #dark = true;
   #showEdges = true;
@@ -69,7 +108,6 @@ export class ViewerScene {
   #modelColor = new Color("#ff8c00");
   #grid: GridHelper | null = null;
   #gridSize = 200;
-  #axes: AxesHelper | null = null;
   #mesh: Mesh | null = null;
   #edges: LineSegments | null = null;
   /** Per triangle: 1 = painted with the model colour. */
@@ -91,7 +129,7 @@ export class ViewerScene {
       onAutoRotateStop?.();
     });
     this.#hemi.position.set(0, 0, 1);
-    this.#scene.add(this.#hemi, this.#key, this.#fill);
+    this.#scene.add(this.#hemi, this.#key, this.#fill, this.#axes);
     this.#applyTheme();
   }
 
@@ -142,7 +180,7 @@ export class ViewerScene {
   setGrid(visible: boolean): void {
     this.#showGrid = visible;
     if (this.#grid) this.#grid.visible = visible;
-    if (this.#axes) this.#axes.visible = visible;
+    this.#axes.visible = visible && this.#mesh !== null;
   }
 
   /** Colour for parts without color(). */
@@ -186,12 +224,12 @@ export class ViewerScene {
     const size = box.getSize(new Vector3());
     const radius = Math.max(size.length() / 2, 0.5);
     this.#rebuildGrid(Math.max(50, Math.ceil((Math.max(size.x, size.y) * 2) / 50) * 50));
-    const axes = new AxesHelper(Math.max(size.x, size.y, size.z) * 0.6);
-    axes.setColors(...this.#theme.axes.map((c) => new Color(c)) as [Color, Color, Color]);
-    axes.position.set(offset.x + box.min.x, offset.y + box.min.y, 0.01);
-    axes.visible = this.#showGrid;
-    this.#axes = axes;
-    this.#scene.add(axes);
+    // From just outside the model's -X/-Y corner, so the arrows don't hide along its bottom edges.
+    const axisLength = Math.max(size.x, size.y, size.z) * 0.6;
+    const margin = Math.max(size.x, size.y) * 0.08;
+    this.#axes.scale.setScalar(axisLength);
+    this.#axes.position.set(offset.x + box.min.x - margin, offset.y + box.min.y - margin, 0.009 * axisLength);
+    this.#axes.visible = this.#showGrid;
 
     const target = new Vector3(0, 0, size.z / 2);
     const d = (radius / Math.sin(MathUtils.degToRad(this.#camera.fov / 2))) * 1.3;
@@ -215,6 +253,12 @@ export class ViewerScene {
     this.#controls.dispose();
     this.#material.dispose();
     this.#edgeMaterial.dispose();
+    const axisGeometries = new Set(this.#axes.children.map((c) => (c as Mesh).geometry));
+    for (const geometry of axisGeometries) geometry.dispose();
+    for (const { solid, hidden } of this.#axisMaterials) {
+      solid.dispose();
+      hidden.dispose();
+    }
     this.#renderer.dispose();
     // dispose() keeps the WebGL context; release it so hot reloads don't pile them up.
     this.#renderer.forceContextLoss();
@@ -229,7 +273,10 @@ export class ViewerScene {
     this.#hemi.groundColor.set(theme.ground);
     this.#edgeMaterial.color.set(theme.edges.color);
     this.#edgeMaterial.opacity = theme.edges.opacity;
-    this.#axes?.setColors(...theme.axes.map((c) => new Color(c)) as [Color, Color, Color]);
+    theme.axes.forEach((color, i) => {
+      this.#axisMaterials[i].solid.color.set(color);
+      this.#axisMaterials[i].hidden.color.set(color);
+    });
     this.#rebuildGrid(this.#gridSize);
   }
 
@@ -257,11 +304,6 @@ export class ViewerScene {
       this.#scene.remove(this.#edges);
       this.#edges.geometry.dispose();
       this.#edges = null;
-    }
-    if (this.#axes) {
-      this.#scene.remove(this.#axes);
-      this.#axes.dispose();
-      this.#axes = null;
     }
   }
 
