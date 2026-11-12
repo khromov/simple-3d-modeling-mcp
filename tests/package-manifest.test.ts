@@ -66,7 +66,7 @@ describe("npm package manifest", () => {
         expect.objectContaining({ path: "dist/index.js" }),
       );
       // The WASM worker, OpenSCAD itself, the bundled fonts / BOSL2 and the viewer page must ship with the package.
-      for (const path of ["dist/engine/wasm-worker.js", "assets/manifest.json", "assets/openscad/openscad.mjs", "assets/openscad/openscad.wasm", "assets/fonts/DejaVuSans.ttf", "assets/libraries/BOSL2/std.scad", "assets/libraries/BOSL2/LICENSE", "dist/viewer-ui/index.html"]) {
+      for (const path of ["dist/engine/wasm-worker.js", "assets/manifest.json", "assets/openscad/openscad.mjs", "assets/openscad/openscad.wasm", "assets/fonts/DejaVuSans.ttf", "assets/libraries/BOSL2/std.scad", "assets/libraries/BOSL2/LICENSE", "dist/viewer-ui/index.html", "dist/viewer-ui/THIRD-PARTY-LICENSES.md"]) {
         expect(packManifest.files).toContainEqual(expect.objectContaining({ path }));
       }
       expect(packManifest.files.some((f) => /^dist\/viewer-ui\/assets\/.+\.js$/.test(f.path))).toBe(true);

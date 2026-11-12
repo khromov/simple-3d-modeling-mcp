@@ -8,12 +8,19 @@ interface SampleServer {
   stop(): Promise<void>;
 }
 
-/** True when the request's Origin is the page served by this dev server. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * True when the request comes from the page this dev server serves: the Origin
+ * names this server and the Host is a loopback name. A DNS-rebinding page also
+ * sends a matching Origin and Host, but its Host is the attacker's domain.
+ */
 function fromDevPage(req: IncomingMessage): boolean {
-  const origin = req.headers.origin;
-  if (!origin || !req.headers.host) return false;
+  const { origin, host } = req.headers;
+  if (!origin || !host) return false;
   try {
-    return new URL(origin).host === req.headers.host;
+    const url = new URL(origin);
+    return url.host === host && LOOPBACK_HOSTS.has(url.hostname);
   } catch {
     return false;
   }
@@ -24,7 +31,8 @@ function fromDevPage(req: IncomingMessage): boolean {
  * module runner) seeded with sample models, and proxies the page's WebSocket and
  * HTTP calls to it. The viewer server only accepts its own Origin, so requests
  * from this dev server's page are re-labelled with it; anything else keeps its
- * Origin and is rejected as usual.
+ * Origin and is rejected as usual. CORS is off, as on the real viewer server,
+ * so other local pages cannot read the proxied responses either.
  */
 function sampleViewerServer(): Plugin {
   let sample: SampleServer | undefined;
@@ -53,6 +61,8 @@ function sampleViewerServer(): Plugin {
       };
       return {
         server: {
+          // Vite's default reflects any localhost Origin; the page itself is same-origin.
+          cors: false,
           proxy: {
             "/ws": { ...api, ws: true },
             "/mesh/": api,
@@ -80,7 +90,9 @@ export default defineConfig({
     // three.js is most of the bundle; it is served from localhost, so size matters little.
     chunkSizeWarningLimit: 1024,
     reportCompressedSize: false,
-    // Keep three.js's MIT @license header in the minified bundle.
+    // License texts of everything bundled (three.js, Svelte, …), shipped next to the page.
+    license: { fileName: "THIRD-PARTY-LICENSES.md" },
+    // Also keep three.js's @license header in the minified bundle.
     rolldownOptions: { output: { comments: { legal: true } } },
   },
 });

@@ -187,6 +187,8 @@ export class ViewerScene {
     this.#material.dispose();
     this.#edgeMaterial.dispose();
     this.#renderer.dispose();
+    // dispose() keeps the WebGL context; release it so hot reloads don't pile them up.
+    this.#renderer.forceContextLoss();
   }
 
   #applyTheme(): void {

@@ -33,7 +33,8 @@ describe("viewer page: mesh decoding", () => {
   });
 
   it("rejects anything that is not a viewer mesh", () => {
-    expect(() => decodeViewerMesh(new TextEncoder().encode("<!DOCTYPE html>").buffer)).toThrow("bad mesh");
+    // Long enough to pass the header length check, so the magic bytes decide.
+    expect(() => decodeViewerMesh(new TextEncoder().encode("<!DOCTYPE html><html></html>").buffer)).toThrow("bad mesh");
     expect(() => decodeViewerMesh(new ArrayBuffer(4))).toThrow("bad mesh");
   });
 });

@@ -86,6 +86,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
@@ -265,28 +266,37 @@ export class ViewerServer {
     this.notFound(res);
   }
 
-  /** Serves a file of the built page; returns false when `path` is not one. */
+  /**
+   * Serves a file of the built page; returns false when `path` is not one.
+   * Every page load lists the build again, so a first build or a rebuild of
+   * the viewer needs no server restart. Only files under /assets/ are kept in
+   * memory: Vite puts a content hash in their names.
+   */
   private async serveUi(path: string, res: ServerResponse): Promise<boolean> {
-    this._uiFiles ??= listUiFiles(this._uiDir);
+    const isPage = path === "/" || path === "/index.html";
+    if (isPage || !this._uiFiles) this._uiFiles = listUiFiles(this._uiDir);
     const files = await this._uiFiles;
-    const urlPath = path === "/" ? "/index.html" : path;
+    const urlPath = isPage ? "/index.html" : path;
     const file = files.get(urlPath);
-    if (!file) {
-      if (path !== "/") return false;
+    const hashed = urlPath.startsWith("/assets/");
+    let body = hashed ? this._uiCache.get(urlPath) : undefined;
+    if (file && !body) {
+      try {
+        body = await readFile(file);
+        if (hashed) this._uiCache.set(urlPath, body);
+      } catch {
+        // Deleted since it was listed (a rebuild is under way).
+      }
+    }
+    if (!body) {
+      if (!isPage) return false;
       res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("The viewer page has not been built. Run `npm run build`.");
       return true;
     }
-    let body = this._uiCache.get(urlPath);
-    if (!body) {
-      body = await readFile(file);
-      this._uiCache.set(urlPath, body);
-    }
-    const isPage = urlPath === "/index.html";
     res.writeHead(200, {
       "Content-Type": CONTENT_TYPES[extname(urlPath)] ?? "application/octet-stream",
-      // Vite puts a content hash in every file name under /assets/.
-      "Cache-Control": urlPath.startsWith("/assets/") ? "max-age=31536000, immutable" : "no-cache",
+      "Cache-Control": hashed ? "max-age=31536000, immutable" : "no-cache",
       ...(isPage ? { "Content-Security-Policy": PAGE_CSP } : {}),
       "X-Content-Type-Options": "nosniff",
     });

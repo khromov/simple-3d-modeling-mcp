@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,16 +70,36 @@ describe("ViewerServer", () => {
     }
   });
 
-  it("explains a missing page build instead of failing silently", async () => {
-    const empty = mkdtempSync(join(tmpdir(), "viewer-ui-"));
+  it("explains a missing page build, and picks up builds and rebuilds without a restart", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "viewer-ui-"));
+    const uiDir = join(tmp, "viewer-ui");
+    const build = (hash: string) => {
+      rmSync(uiDir, { recursive: true, force: true });
+      mkdirSync(join(uiDir, "assets"), { recursive: true });
+      writeFileSync(join(uiDir, "index.html"), `<script type="module" src="/assets/index-${hash}.js"></script>`);
+      writeFileSync(join(uiDir, "assets", `index-${hash}.js`), `console.log("${hash}")`);
+    };
     try {
-      server = new ViewerServer({ uiDir: join(empty, "missing") });
+      server = new ViewerServer({ uiDir });
       const url = await server.start();
-      const res = await fetch(url);
-      expect(res.status).toBe(503);
-      expect(await res.text()).toContain("npm run build");
+      const missing = await fetch(url);
+      expect(missing.status).toBe(503);
+      expect(await missing.text()).toContain("npm run build");
+
+      build("aaa");
+      expect(await (await fetch(url)).text()).toContain("index-aaa.js");
+      expect(await (await fetch(`${url}/assets/index-aaa.js`)).text()).toContain("aaa");
+
+      build("bbb");
+      expect(await (await fetch(url)).text()).toContain("index-bbb.js");
+      expect((await fetch(`${url}/assets/index-bbb.js`)).status).toBe(200);
+      expect((await fetch(`${url}/assets/index-aaa.js`)).status).toBe(200); // served from memory: same hash, same bytes
+
+      rmSync(uiDir, { recursive: true, force: true });
+      expect((await fetch(url)).status).toBe(503);
+      expect((await fetch(`${url}/assets/index-ccc.js`)).status).toBe(404);
     } finally {
-      rmSync(empty, { recursive: true, force: true });
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 
