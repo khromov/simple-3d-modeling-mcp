@@ -33,8 +33,9 @@
 </script>
 
 <Section title="Export">
-  <a id="dl-stl" class="export" href="/model/{version}.stl">↓ Download STL</a>
-  <a id="dl-3mf" class="export" href="/model/{version}.3mf">↓ Download 3MF (with colours)</a>
+  <!-- `download` makes these downloads rather than navigations; Firefox closes the page's WebSocket when a navigation starts. -->
+  <a id="dl-stl" class="export" href="/model/{version}.stl" download>↓ Download STL</a>
+  <a id="dl-3mf" class="export" href="/model/{version}.3mf" download>↓ Download 3MF (with colours)</a>
   <select id="slicer" bind:value={slicer} aria-label="Slicer">
     {#each SLICERS as s (s.value)}
       <option value={s.value}>{s.label}</option>
