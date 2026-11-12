@@ -17,6 +17,7 @@
   let wireframe = $state(false);
   let autoRotate = $state(false);
   let grid = $state(true);
+  let helpOpen = $state(false);
 
   const scene = new ViewerScene({ onAutoRotateStop: () => (autoRotate = false) });
   $effect(() => () => scene.dispose());
@@ -54,9 +55,9 @@
         {/each}
       </ul>
     {/if}
-    <!-- The controls, folded into a "?" box that opens on hover, keyboard focus or a tap. -->
-    <div class="help">
-      <div class="hints" id="view-help">
+    <!-- The controls, folded into a "?" box: a click opens it, another click closes it. -->
+    <div class={["help", { open: helpOpen }]}>
+      <div class="hints" id="view-help" aria-hidden={!helpOpen}>
         <ul class="mouse">
           <li><kbd>Drag</kbd> rotate</li>
           <li><kbd>Scroll</kbd> zoom</li>
@@ -68,7 +69,16 @@
           <li><kbd>Two fingers</kbd> pan</li>
         </ul>
       </div>
-      <button class="toggle" aria-label="View controls" aria-describedby="view-help">?</button>
+      <button
+        class="toggle"
+        aria-label="View controls"
+        aria-expanded={helpOpen}
+        aria-controls="view-help"
+        onclick={() => (helpOpen = !helpOpen)}
+        onkeydown={(e) => {
+          if (e.key === "Escape") helpOpen = false;
+        }}
+      >?</button>
     </div>
   </div>
 
@@ -117,14 +127,14 @@
     box-shadow: 2px 2px 0 var(--shadow);
     pointer-events: auto;
   }
-  /* Folded to nothing until the box is hovered or focused; still read by screen readers. */
+  /* Folded to nothing until the "?" is clicked. */
   .hints {
     max-width: 0;
     overflow: hidden;
     opacity: 0;
     transition: max-width 220ms ease, opacity 160ms ease;
   }
-  .help:hover .hints, .help:focus-within .hints { max-width: 560px; opacity: 1; }
+  .open .hints { max-width: 560px; opacity: 1; }
   .hints ul {
     display: flex;
     align-items: center;
@@ -150,9 +160,10 @@
     font-weight: 700;
     font-size: 15px;
     line-height: 1;
-    cursor: help;
+    cursor: pointer;
   }
-  .help:hover .toggle, .help:focus-within .toggle { background: var(--ink); color: var(--paper); }
+  .toggle:hover { background: var(--paper-sunk); }
+  .open .toggle { background: var(--ink); color: var(--paper); }
   .toggle:focus-visible { outline-offset: 3px; }
   kbd {
     margin-right: 3px;
