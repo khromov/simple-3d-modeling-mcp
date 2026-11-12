@@ -5,7 +5,7 @@
   "bootstrap-sha": "b16c47196251e8154e0c0ad9d562151bac1bea96",
   "packages": {
     ".": {
-      "package-name": "@khromov/simple-3d-modeling-mcp",
+      "package-name": "sketchpad-3d-model-mcp",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {

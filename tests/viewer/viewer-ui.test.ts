@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { computeStats } from "../../src/geometry/stats.js";
 import { encodeViewerMesh } from "../../src/viewer/viewer-server.js";
 import { ViewerState } from "../../src/viewer/viewer-state.js";
-import { formatMm, formatVolume, modelTitle, timeAgo } from "../../viewer/src/lib/format.js";
+import { formatLength, formatVolume, modelTitle, timeAgo } from "../../viewer/src/lib/format.js";
+import { highlightLines, tokenize, type Token } from "../../viewer/src/lib/highlight.js";
 import { decodeViewerMesh } from "../../viewer/src/lib/mesh.js";
 import { box, lShape } from "../helpers/meshes.js";
 
@@ -41,8 +42,8 @@ describe("viewer page: mesh decoding", () => {
 
 describe("viewer page: formatting", () => {
   it("formats dimensions, volume and titles like the sidebar shows them", () => {
-    expect(formatMm(30)).toBe("30 mm");
-    expect(formatMm(12.3456)).toBe("12.35 mm");
+    expect(formatLength(30)).toBe("30");
+    expect(formatLength(12.3456)).toBe("12.35");
     expect(formatVolume(3375, false)).toBe("3.38 cm³");
     expect(formatVolume(800, true)).toBe("8.00 cm²");
     expect(modelTitle({ title: "Plate", is2D: true })).toBe("Plate (2D, shown 1 mm thick)");
@@ -54,5 +55,49 @@ describe("viewer page: formatting", () => {
     expect(timeAgo(now - 5_000, now)).toBe("5s ago");
     expect(timeAgo(now - 5 * 60_000, now)).toBe("5m ago");
     expect(timeAgo(now - 2 * 3_600_000, now)).toBe("2h ago");
+  });
+});
+
+describe("viewer page: OpenSCAD highlighting", () => {
+  /** The type of the token with exactly this text. */
+  const typeOf = (tokens: Token[], text: string) => tokens.find((t) => t.text === text)?.type;
+
+  it("colours keywords, built-ins, numbers, strings, specials and comments", () => {
+    const tokens = tokenize('$fn = 32; // smooth\ncolor("red") translate([1.5, 0, 2e3]) cube(10);');
+    expect(typeOf(tokens, "$fn")).toBe("special");
+    expect(typeOf(tokens, "=")).toBe("operator");
+    expect(typeOf(tokens, "32")).toBe("number");
+    expect(typeOf(tokens, "// smooth")).toBe("comment");
+    expect(typeOf(tokens, '"red"')).toBe("string");
+    expect(typeOf(tokens, "translate")).toBe("builtin");
+    expect(typeOf(tokens, "1.5")).toBe("number");
+    expect(typeOf(tokens, "2e3")).toBe("number");
+    expect(typeOf(tokens, "cube")).toBe("builtin");
+  });
+
+  it("marks definitions, include paths and escaped quotes", () => {
+    const tokens = tokenize('include <BOSL2/std.scad>\nmodule part(s) { echo("a \\"b\\" c"); }\nfunction f(x) = x;');
+    expect(typeOf(tokens, "include")).toBe("keyword");
+    expect(typeOf(tokens, "<BOSL2/std.scad>")).toBe("path");
+    expect(typeOf(tokens, "module")).toBe("keyword");
+    expect(typeOf(tokens, "part")).toBe("definition");
+    expect(typeOf(tokens, "f")).toBe("definition");
+    expect(typeOf(tokens, '"a \\"b\\" c"')).toBe("string");
+    expect(typeOf(tokens, "s")).toBeUndefined(); // plain text, merged with its neighbours
+  });
+
+  it("keeps every character, in order", () => {
+    const code = 'a<b ? [for (i = [0:2]) i] : "x\n/* not a comment */";\n/* unterminated';
+    expect(tokenize(code).map((t) => t.text).join("")).toBe(code);
+  });
+
+  it("splits into lines, block comments included, without an empty last line", () => {
+    const lines = highlightLines("/* one\ntwo */\n\ncube(1);\n");
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toEqual([{ type: "comment", text: "/* one" }]);
+    expect(lines[1]).toEqual([{ type: "comment", text: "two */" }]);
+    expect(lines[2]).toEqual([]);
+    expect(lines[3][0]).toEqual({ type: "builtin", text: "cube" });
+    expect(highlightLines("")).toEqual([[]]);
   });
 });

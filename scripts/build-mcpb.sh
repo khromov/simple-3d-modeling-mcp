@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/mcpb-build"
 MCPB_DIR="$PROJECT_DIR/mcpb"
-OUTPUT="$PROJECT_DIR/simple-3d-modeling.mcpb"
+OUTPUT="$PROJECT_DIR/sketchpad-3d.mcpb"
 
 echo "=== Building .mcpb Desktop Extension ==="
 

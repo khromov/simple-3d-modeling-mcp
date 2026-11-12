@@ -1,21 +1,66 @@
 <script lang="ts">
+  import Pipette from "@lucide/svelte/icons/pipette";
   import Section from "./Section.svelte";
 
-  let { dark = $bindable(), color = $bindable() }: { dark: boolean; color: string } = $props();
+  let { color = $bindable() }: { color: string } = $props();
+
+  const PRESETS = [
+    { hex: "#ff8c00", name: "Orange" },
+    { hex: "#d63c26", name: "Red" },
+    { hex: "#f2b330", name: "Yellow" },
+    { hex: "#2f67c7", name: "Blue" },
+    { hex: "#7a7a7a", name: "Grey" },
+    { hex: "#f4f4f2", name: "White" },
+  ];
+
+  const isCustom = $derived(!PRESETS.some((p) => p.hex === color.toLowerCase()));
 </script>
 
-<Section title="Appearance">
-  <div class="row">
-    <span>Theme</span>
-    <button class="btn toggle" id="theme" onclick={() => (dark = !dark)}>{dark ? "Light" : "Dark"}</button>
+<Section title="Model colour">
+  {#snippet aside()}{color}{/snippet}
+  <div class="swatches" role="radiogroup" aria-label="Model colour">
+    {#each PRESETS as p (p.hex)}
+      <button
+        class="swatch"
+        role="radio"
+        aria-checked={color.toLowerCase() === p.hex}
+        aria-label={p.name}
+        title={p.name}
+        onclick={() => (color = p.hex)}
+      >
+        <!-- An SVG fill rather than a style attribute: the page's CSP forbids inline styles. -->
+        <svg viewBox="0 0 10 10" preserveAspectRatio="none" aria-hidden="true"><rect x="-1" y="-1" width="12" height="12" fill={p.hex} /></svg>
+      </button>
+    {/each}
+    <label class={["swatch", "custom", { selected: isCustom }]} title="Pick any colour">
+      <input type="color" bind:value={color} aria-label="Custom model colour" />
+      <Pipette size={15} strokeWidth={2.25} />
+    </label>
   </div>
-  <div class="row">
-    <span>Model colour</span>
-    <input type="color" id="color" bind:value={color} title="Used for parts without color()" aria-label="Model colour" />
-  </div>
+  <p class="help">Used for parts without a set <code>color()</code>.</p>
 </Section>
 
 <style>
-  .toggle { padding: 3px 10px; }
-  input { width: 28px; height: 22px; border: 1px solid var(--btn-border); border-radius: 4px; background: none; cursor: pointer; padding: 0; }
+  .swatches { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; max-width: 330px; padding: 2px 0; }
+  .swatch {
+    position: relative;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: var(--rule);
+    background: var(--paper-raised);
+    cursor: pointer;
+  }
+  .swatch svg { width: 100%; height: 100%; display: block; }
+  .swatch:hover { transform: translate(-1px, -1px); box-shadow: 2px 2px 0 var(--shadow); }
+  /* A ring with a gap around the chosen swatch; it sits in the 10px gutter, clear of the neighbours. */
+  .swatch[aria-checked="true"], .swatch.selected { outline: 2px solid var(--ink); outline-offset: 3px; transform: none; box-shadow: none; }
+  .custom { background: conic-gradient(var(--bauhaus-red), var(--bauhaus-yellow), var(--bauhaus-blue), var(--bauhaus-red)); color: #161616; }
+  .custom :global(svg) { width: 15px; height: 15px; padding: 2px; box-sizing: content-box; background: #ffffffd0; }
+  .custom:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; }
+
+  .help { margin-top: 10px; color: var(--ink-soft); font-size: 12px; }
+  code { font: 500 11px var(--font-mono); }
 </style>

@@ -1,10 +1,10 @@
 {
-  "name": "@khromov/simple-3d-modeling-mcp",
+  "name": "sketchpad-3d-model-mcp",
   "version": "1.0.0",
   "description": "MCP server that lets Claude and other AI assistants create, preview and export 3D models with OpenSCAD — zero setup (bundled WASM), BOSL2 included",
   "type": "module",
   "bin": {
-    "simple-3d-modeling-mcp": "dist/index.js"
+    "sketchpad-3d-model-mcp": "dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

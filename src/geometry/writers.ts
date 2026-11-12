@@ -11,7 +11,7 @@ import { createZip } from "./zip.js";
 
 const encoder = new TextEncoder();
 
-export function writeBinaryStl(mesh: Mesh, header = "simple-3d-modeling-mcp"): Uint8Array {
+export function writeBinaryStl(mesh: Mesh, header = "sketchpad-3d-model-mcp"): Uint8Array {
   const { positions: p, indices: idx } = mesh;
   const count = idx.length / 3;
   const buf = new ArrayBuffer(84 + count * 50);
@@ -49,7 +49,7 @@ function num(v: number): string {
 
 export function writeObj(mesh: Mesh): Uint8Array {
   const m = weldVertices(mesh);
-  const lines: string[] = ["# simple-3d-modeling-mcp"];
+  const lines: string[] = ["# sketchpad-3d-model-mcp"];
   const p = m.positions;
   for (let i = 0; i < p.length; i += 3) lines.push(`v ${num(p[i])} ${num(p[i + 1])} ${num(p[i + 2])}`);
   const idx = m.indices;
@@ -106,7 +106,7 @@ export function write3mf(mesh: Mesh, opts: { title?: string } = {}): Uint8Array 
   const parts: string[] = [];
   parts.push('<?xml version="1.0" encoding="UTF-8"?>\n');
   parts.push('<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n');
-  parts.push(' <metadata name="Application">simple-3d-modeling-mcp</metadata>\n');
+  parts.push(' <metadata name="Application">sketchpad-3d-model-mcp</metadata>\n');
   if (opts.title) parts.push(` <metadata name="Title">${escapeXml(opts.title)}</metadata>\n`);
   parts.push(" <resources>\n");
   const objectId = triMaterial ? 2 : 1;

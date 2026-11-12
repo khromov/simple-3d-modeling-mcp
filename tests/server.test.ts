@@ -86,6 +86,7 @@ describe("MCP server", () => {
     expect(t).toContain('"w", 40');
     expect(t).toMatch(/Interactive viewer: http:\/\/localhost:\d+/);
     expect(app.viewer.state.latest?.title).toBe("Test block");
+    expect(app.viewer.state.latest?.source).toEqual({ code: '// Test block\necho("w", 40);\ncube([40, 20, 10]);' });
 
     await call("render", { code: "cube(3);", width: 64, height: 64 });
     expect(opened).toHaveLength(1);
@@ -192,6 +193,10 @@ describe("MCP server", () => {
     const r = await call("render", { file: main, width: 64, height: 64 });
     expect(textOf(r)).toContain("Size: 6 × 6 × 6 mm");
     expect(app.viewer.state.latest?.title).toBe("main");
+    expect(app.viewer.state.latest?.source).toMatchObject({ code: "use <parts/lib.scad>\npart(6);\n", file: "main.scad" });
+
+    await call("render", { file: main, params: { s: 4 }, width: 64, height: 64 });
+    expect(app.viewer.state.latest?.source?.params).toEqual(["s=4"]);
   });
 
   it("only reads .scad files", async () => {

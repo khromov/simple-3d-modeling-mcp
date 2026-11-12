@@ -76,7 +76,7 @@ jobs:
         run: npm run build:mcpb
 
       - name: Attach .mcpb to the GitHub release
-        run: gh release upload "$TAG" simple-3d-modeling.mcpb --clobber
+        run: gh release upload "$TAG" sketchpad-3d.mcpb --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

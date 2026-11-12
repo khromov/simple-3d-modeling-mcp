@@ -168,7 +168,7 @@ async function mainSession(s, rec) {
     req(`tools/call ${name}: ${label}`, "tools/call", { name, ...(args !== undefined ? { arguments: args } : {}) }, expect);
 
   await req("initialize", ...init("2025-06-18"), "result", (r) =>
-    r.result.serverInfo?.name === "simple-3d-modeling-mcp" ? undefined : `unexpected serverInfo ${JSON.stringify(r.result.serverInfo)}`,
+    r.result.serverInfo?.name === "sketchpad-3d-model-mcp" ? undefined : `unexpected serverInfo ${JSON.stringify(r.result.serverInfo)}`,
   );
   rec("notifications/initialized", await s.notify("notifications/initialized"), "none");
   await req("ping", "ping");

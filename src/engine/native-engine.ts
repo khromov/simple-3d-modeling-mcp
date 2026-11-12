@@ -102,7 +102,7 @@ export class NativeEngine extends BaseEngine {
 
   constructor(readonly probe: NativeProbe, opts: NativeEngineOptions = {}) {
     super();
-    this.workDir = opts.workDir ?? join(tmpdir(), "simple-3d-modeling-mcp");
+    this.workDir = opts.workDir ?? join(tmpdir(), "sketchpad-3d-model-mcp");
     this.timeoutMs = opts.timeoutMs ?? 120_000;
     this.capabilities = {
       png: true,

@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-`@khromov/simple-3d-modeling-mcp` is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup, OpenSCAD's official nightly build); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer (a Vite + Svelte 5 app in `viewer/`) and a Claude Desktop `.mcpb` bundle.
+Sketchpad 3D (`sketchpad-3d-model-mcp` on npm, formerly `@khromov/simple-3d-modeling-mcp`) is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup, OpenSCAD's official nightly build); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer (a Vite + Svelte 5 app in `viewer/`) and a Claude Desktop `.mcpb` bundle.
 
 ## Commands
 
@@ -18,7 +18,7 @@ npm run typecheck    # sources (tsconfig.json), tests (tsconfig.test.json), view
 npm test             # vitest; runs `npm run assets` and `npm run build:viewer` first
 npx vitest run tests/rendering/software-renderer.test.ts   # a single file
 bun --bun vitest run # the same suite on the Bun runtime (CI runs latest Bun)
-npm run build:mcpb   # Claude Desktop extension → simple-3d-modeling.mcpb
+npm run build:mcpb   # Claude Desktop extension → sketchpad-3d.mcpb
 node scripts/capture-mcp-traffic.mjs out.json   # record the built server's stdio JSON-RPC traffic (diff two runs)
 ```
 
@@ -48,7 +48,10 @@ src/rendering/          camera conventions, software rasteriser, previews (singl
 src/viewer/             local HTTP + WebSocket viewer server (serves dist/viewer-ui, mesh/STL/3MF, slicer launch, version history)
 viewer/                 the viewer page: Vite + Svelte 5 npm workspace, built into dist/viewer-ui (three.js bundled)
   src/App.svelte        state and layout: WebSocket connection, current model, theme, model colour
-  src/components/       Viewport (canvas + overlays), Controls, sidebar sections (Dimensions, History, Appearance, Export)
+  src/app.css           design tokens (light "paper" / dark "blueprint" themes), fonts, shared .btn/.tag styles
+  src/components/       TopBar (status, theme toggle), Viewport (canvas + overlays), Controls (view toolbar),
+                        numbered sidebar Sections (Dimensions, History, Code, Appearance, Export), CodeView, Logo
+  src/lib/highlight.ts  OpenSCAD tokenizer for the read-only code view (tokens are rendered as text, never HTML)
   src/lib/scene.ts      three.js scene: model, edges, grid, axes, lights, orbit camera
   src/lib/mesh.ts       decodes the server's binary mesh (encodeViewerMesh in src/viewer/viewer-server.ts)
   src/lib/protocol.ts   WebSocket message types the server sends
@@ -72,7 +75,7 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - **Keep tool results small.** No multi-MB base64 payloads: clients built on the official MCP SDK drop stdio messages over 10 MB, and big payloads waste context. `export` writes files and returns a `resource_link`; inline embedding is opt-in (`embed`). Inline images and embedded files are capped at `MAX_INLINE_BYTES` (2 MiB): tmcp validates every result's base64 with a regex that overflows V8's stack at about 3.2 MiB, which would turn the result into a JSON-RPC error.
 - **File safety**: `export` never overwrites unless `overwrite: true`, and the path extension must match the format. `read_scad_file` and `save_scad_file` only accept `.scad`. Relative paths resolve against the export folder, never the process cwd.
 - **Viewer security**: it binds to `127.0.0.1`, checks the Host header on every request and the Origin on WebSocket and POST, and serves only the files of the built page, with three.js bundled in (no CDN). The page's CSP allows scripts and styles from `'self'` only, so the UI must not use inline `<script>`, `<style>` or `style="…"` attributes. Keep all of this when changing the viewer.
-- **Viewer page** (`viewer/`): an npm workspace with its own devDependencies, including TypeScript 6, because svelte-check does not support the root's TypeScript 7 yet. The three.js code lives in `src/lib/scene.ts`; components drive it through `$effect`. If you change what the server sends (`encodeViewerMesh`, `updateMessage`), update `src/lib/mesh.ts` / `src/lib/protocol.ts`; `tests/viewer/viewer-ui.test.ts` round-trips the mesh format. The page connects its WebSocket to `/ws` (the server accepts any path), so the dev proxy can tell it apart from Vite's own.
+- **Viewer page** (`viewer/`): an npm workspace with its own devDependencies, including TypeScript 6, because svelte-check does not support the root's TypeScript 7 yet. The three.js code lives in `src/lib/scene.ts`; components drive it through `$effect`. If you change what the server sends (`encodeViewerMesh`, `updateMessage`, `GET /source/:version`), update `src/lib/mesh.ts` / `src/lib/protocol.ts`; `tests/viewer/viewer-ui.test.ts` round-trips the mesh format. The page connects its WebSocket to `/ws` (the server accepts any path), so the dev proxy can tell it apart from Vite's own. The WebGL canvas is transparent and the page paints the paper behind it, so the grid, edge and axis colours in `scene.ts` (`THEMES`) are matched to the tokens in `src/app.css`; change them together. Icons come from `@lucide/svelte` (import each icon from `@lucide/svelte/icons/<name>`); fonts are bundled from `@fontsource` packages, since the CSP only allows the page's own origin. Colours that vary per item (swatches) are SVG `fill` attributes, not inline styles.
 - **Native engine**: auto mode only selects an installed OpenSCAD that supports `--backend` (Manifold). Each run gets its own temp directory, which is deleted afterwards. `--render` is never passed for PNGs (OpenCSG preview is faster and keeps colours).
 - The package-root lookup in `paths.ts` matches the package name with a regex; update it if the package is renamed.
 
@@ -102,6 +105,6 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `perf:`, `docs:`, `ci:`, `build:`, `feat!:` / `BREAKING CHANGE:`). release-please reads them on `main`.
 - **Do not edit versions by hand.** release-please manages `package.json`, `package-lock.json`, `mcpb/manifest.json` (via `extra-files`), `.release-please-manifest.json` and `CHANGELOG.md`.
-- Merging the release PR tags `vX.Y.Z`. `.github/workflows/release.yml` then type-checks, tests, publishes to npm with trusted publishing (OIDC, provenance, no token), and uploads the `.mcpb` to the GitHub release. `package.json` `repository.url` must stay `git+https://github.com/khromov/simple-3d-modeling-mcp.git`, or OIDC publishing fails.
+- Merging the release PR tags `vX.Y.Z`. `.github/workflows/release.yml` then type-checks, tests, publishes to npm with trusted publishing (OIDC, provenance, no token), and uploads the `.mcpb` to the GitHub release. `package.json` `repository.url` must stay `git+https://github.com/khromov/simple-3d-modeling-mcp.git` (the repository kept its old name), or OIDC publishing fails.
 - Keep these in sync: the npm version in `release.yml` and `tests/package-manifest.test.ts` (currently 12.2.2), and the Node range in `package.json` `engines` and `mcpb/manifest.json` `compatibility.runtimes.node`.
 - CI (`.github/workflows/ci.yml`) runs Linux/macOS/Windows × Node 22/24/26 and × latest Bun (tests via `bun --bun vitest run`), each followed by a stdio smoke test with `scripts/capture-mcp-traffic.mjs`, plus an `.mcpb` build whose unzipped server gets the same smoke test. The Bun job skips `tests/package-manifest.test.ts`, which would run npm itself under Bun. Workflows on PRs opened by release-please need a manual "Approve and run".

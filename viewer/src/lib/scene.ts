@@ -4,20 +4,24 @@
  */
 
 import {
-  AxesHelper,
   BufferAttribute,
   BufferGeometry,
   Color,
+  ConeGeometry,
+  CylinderGeometry,
   DirectionalLight,
   DoubleSide,
   EdgesGeometry,
   GridHelper,
+  Group,
   HemisphereLight,
   LineBasicMaterial,
   LineSegments,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshPhongMaterial,
+  MOUSE,
   Object3D,
   PerspectiveCamera,
   Scene,
@@ -29,10 +33,60 @@ import type { ViewerMesh } from "./mesh.js";
 
 Object3D.DEFAULT_UP.set(0, 0, 1); // OpenSCAD is Z-up
 
+/**
+ * Line colours per theme. The canvas is transparent and the page paints the
+ * paper behind it, so these are matched to the tokens in app.css: ink on
+ * paper (#f3efe6) for light, white on blueprint blue (#143560) for dark.
+ */
+const THEMES = {
+  light: {
+    ground: 0x909090,
+    edges: { color: 0x161616, opacity: 0.6 },
+    grid: { center: 0xa6a39d, lines: 0xd8d5cd },
+    axes: [0xd63c26, 0x2e8b4f, 0x2456b0],
+  },
+  dark: {
+    ground: 0x3a5478,
+    edges: { color: 0xf0f5fc, opacity: 0.7 },
+    grid: { center: 0x768caa, lines: 0x375377 },
+    axes: [0xff5a45, 0x2fd27a, 0x5ba3ff],
+  },
+} as const;
+
+/** Per axis: the solid arrow, and its "hidden line" twin that shows faintly through the model. */
+interface AxisMaterials {
+  solid: MeshBasicMaterial;
+  hidden: MeshBasicMaterial;
+}
+
+/**
+ * X, Y and Z arrows of unit length (scaled to each model): a shaft and a cone
+ * tip each, flat-coloured like ink. Lines would be 1px wide on most GPUs.
+ * Where the model is in front of an arrow, its hidden twin draws it faintly,
+ * as a technical drawing shows hidden edges.
+ */
+function buildAxes(materials: AxisMaterials[]): Group {
+  const shaft = new CylinderGeometry(0.009, 0.009, 0.86, 12).translate(0, 0.43, 0); // along +Y
+  const tip = new ConeGeometry(0.035, 0.14, 20).translate(0, 0.93, 0);
+  const group = new Group();
+  // Turn +Y onto +X, +Y and +Z.
+  [[0, 0, -Math.PI / 2], [0, 0, 0], [Math.PI / 2, 0, 0]].forEach(([x, y, z], i) => {
+    for (const geometry of [shaft, tip]) {
+      for (const material of [materials[i].solid, materials[i].hidden]) {
+        const arrow = new Mesh(geometry, material);
+        arrow.rotation.set(x, y, z);
+        group.add(arrow);
+      }
+    }
+  });
+  group.visible = false;
+  return group;
+}
+
 export class ViewerScene {
   readonly #scene = new Scene();
   readonly #camera = new PerspectiveCamera(40, 1, 0.1, 10000);
-  readonly #renderer = new WebGLRenderer({ antialias: true });
+  readonly #renderer = new WebGLRenderer({ antialias: true, alpha: true });
   readonly #controls: OrbitControls;
   readonly #hemi = new HemisphereLight(0xffffff, 0x404060, 1.2);
   readonly #key = new DirectionalLight(0xffffff, 1.6);
@@ -42,6 +96,12 @@ export class ViewerScene {
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, // keep edge lines on top
   });
   readonly #edgeMaterial = new LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 });
+  readonly #axisMaterials: AxisMaterials[] = [0, 1, 2].map(() => ({
+    solid: new MeshBasicMaterial(),
+    // Transparent, so it draws after the model; without a depth test, it shows through it.
+    hidden: new MeshBasicMaterial({ transparent: true, opacity: 0.3, depthTest: false, depthWrite: false }),
+  }));
+  readonly #axes = buildAxes(this.#axisMaterials);
 
   #dark = true;
   #showEdges = true;
@@ -49,7 +109,6 @@ export class ViewerScene {
   #modelColor = new Color("#ff8c00");
   #grid: GridHelper | null = null;
   #gridSize = 200;
-  #axes: AxesHelper | null = null;
   #mesh: Mesh | null = null;
   #edges: LineSegments | null = null;
   /** Per triangle: 1 = painted with the model colour. */
@@ -57,13 +116,27 @@ export class ViewerScene {
   #home: { position: Vector3; target: Vector3 } | null = null;
   #lastRadius = 0;
 
-  constructor() {
+  /** `onAutoRotateStop` runs when a drag, touch or scroll turns auto-rotate off. */
+  constructor({ onAutoRotateStop }: { onAutoRotateStop?: () => void } = {}) {
     this.#renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.#renderer.setClearColor(0x000000, 0); // the page's paper shows through
     this.#controls = new OrbitControls(this.#camera, this.#renderer.domElement);
     this.#controls.enableDamping = true;
     this.#controls.autoRotateSpeed = 1.5;
+    // Middle-drag pans, like right-drag (the scroll wheel already zooms), as in most CAD tools.
+    this.#controls.mouseButtons = { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.PAN };
+    // Keep the browser's middle-click autoscroll from starting as well.
+    this.#renderer.domElement.addEventListener("mousedown", (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+    // Taking hold of the model hands the camera back to the user.
+    this.#controls.addEventListener("start", () => {
+      if (!this.#controls.autoRotate) return;
+      this.#controls.autoRotate = false;
+      onAutoRotateStop?.();
+    });
     this.#hemi.position.set(0, 0, 1);
-    this.#scene.add(this.#hemi, this.#key, this.#fill);
+    this.#scene.add(this.#hemi, this.#key, this.#fill, this.#axes);
     this.#applyTheme();
   }
 
@@ -74,7 +147,9 @@ export class ViewerScene {
       const w = container.clientWidth, h = container.clientHeight;
       if (!w || !h) return;
       this.#camera.aspect = w / h;
-      this.#camera.updateProjectionMatrix();
+      // Lens shift: the picture moves up to centre the model in the space above the
+      // toolbar, while the camera still orbits the model's centre.
+      this.#camera.setViewOffset(w, h, 0, Math.round(Math.min(36, h * 0.05)), w, h);
       this.#renderer.setSize(w, h);
     };
     const observer = new ResizeObserver(resize);
@@ -114,7 +189,7 @@ export class ViewerScene {
   setGrid(visible: boolean): void {
     this.#showGrid = visible;
     if (this.#grid) this.#grid.visible = visible;
-    if (this.#axes) this.#axes.visible = visible;
+    this.#axes.visible = visible && this.#mesh !== null;
   }
 
   /** Colour for parts without color(). */
@@ -158,11 +233,12 @@ export class ViewerScene {
     const size = box.getSize(new Vector3());
     const radius = Math.max(size.length() / 2, 0.5);
     this.#rebuildGrid(Math.max(50, Math.ceil((Math.max(size.x, size.y) * 2) / 50) * 50));
-    const axes = new AxesHelper(Math.max(size.x, size.y, size.z) * 0.6);
-    axes.position.set(offset.x + box.min.x, offset.y + box.min.y, 0.01);
-    axes.visible = this.#showGrid;
-    this.#axes = axes;
-    this.#scene.add(axes);
+    // From just outside the model's -X/-Y corner, so the arrows don't hide along its bottom edges.
+    const axisLength = Math.max(size.x, size.y, size.z) * 0.6;
+    const margin = Math.max(size.x, size.y) * 0.08;
+    this.#axes.scale.setScalar(axisLength);
+    this.#axes.position.set(offset.x + box.min.x - margin, offset.y + box.min.y - margin, 0.009 * axisLength);
+    this.#axes.visible = this.#showGrid;
 
     const target = new Vector3(0, 0, size.z / 2);
     const d = (radius / Math.sin(MathUtils.degToRad(this.#camera.fov / 2))) * 1.3;
@@ -186,16 +262,30 @@ export class ViewerScene {
     this.#controls.dispose();
     this.#material.dispose();
     this.#edgeMaterial.dispose();
+    const axisGeometries = new Set(this.#axes.children.map((c) => (c as Mesh).geometry));
+    for (const geometry of axisGeometries) geometry.dispose();
+    for (const { solid, hidden } of this.#axisMaterials) {
+      solid.dispose();
+      hidden.dispose();
+    }
     this.#renderer.dispose();
     // dispose() keeps the WebGL context; release it so hot reloads don't pile them up.
     this.#renderer.forceContextLoss();
   }
 
+  get #theme() {
+    return this.#dark ? THEMES.dark : THEMES.light;
+  }
+
   #applyTheme(): void {
-    const dark = this.#dark;
-    this.#scene.background = new Color(dark ? 0x1a1a2e : 0xf0f0f0);
-    this.#hemi.groundColor.set(dark ? 0x404060 : 0x909090);
-    this.#edgeMaterial.color.set(dark ? 0x000000 : 0x222222);
+    const theme = this.#theme;
+    this.#hemi.groundColor.set(theme.ground);
+    this.#edgeMaterial.color.set(theme.edges.color);
+    this.#edgeMaterial.opacity = theme.edges.opacity;
+    theme.axes.forEach((color, i) => {
+      this.#axisMaterials[i].solid.color.set(color);
+      this.#axisMaterials[i].hidden.color.set(color);
+    });
     this.#rebuildGrid(this.#gridSize);
   }
 
@@ -204,8 +294,8 @@ export class ViewerScene {
       this.#scene.remove(this.#grid);
       this.#grid.dispose();
     }
-    const dark = this.#dark;
-    const grid = new GridHelper(size, Math.min(100, Math.round(size / 10)), dark ? 0x44446a : 0xbbbbcc, dark ? 0x2a2a48 : 0xdcdce6);
+    const { center, lines } = this.#theme.grid;
+    const grid = new GridHelper(size, Math.min(100, Math.round(size / 10)), center, lines);
     grid.rotation.x = Math.PI / 2; // XY plane
     grid.visible = this.#showGrid;
     this.#grid = grid;
@@ -223,11 +313,6 @@ export class ViewerScene {
       this.#scene.remove(this.#edges);
       this.#edges.geometry.dispose();
       this.#edges = null;
-    }
-    if (this.#axes) {
-      this.#scene.remove(this.#axes);
-      this.#axes.dispose();
-      this.#axes = null;
     }
   }
 

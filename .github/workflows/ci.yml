@@ -105,10 +105,10 @@ jobs:
         run: npm run build:mcpb
 
       - name: Inspect bundle
-        run: npx --yes @anthropic-ai/mcpb info simple-3d-modeling.mcpb
+        run: npx --yes @anthropic-ai/mcpb info sketchpad-3d.mcpb
 
       # Runs the server exactly as packed, with only its pruned production dependencies.
       - name: MCP stdio smoke test (bundled server)
         run: |
-          unzip -q simple-3d-modeling.mcpb -d "$RUNNER_TEMP/bundle"
+          unzip -q sketchpad-3d.mcpb -d "$RUNNER_TEMP/bundle"
           node scripts/capture-mcp-traffic.mjs "$RUNNER_TEMP/mcpb-traffic.json" "$RUNNER_TEMP/bundle/server/dist/index.js"

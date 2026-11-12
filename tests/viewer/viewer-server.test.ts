@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { computeStats } from "../../src/geometry/stats.js";
-import { buildSlicerCommand, ViewerServer } from "../../src/viewer/viewer-server.js";
+import { buildSlicerCommand, slicerFileFormat, ViewerServer } from "../../src/viewer/viewer-server.js";
 import { box, lShape } from "../helpers/meshes.js";
 
 function rawGet(url: string, path: string, headers: Record<string, string>): Promise<number> {
@@ -168,6 +168,21 @@ describe("ViewerServer", () => {
     expect((await fetch(`${url}/model/99`)).status).toBe(404);
   });
 
+  it("serves each version's source, read-only, as JSON", async () => {
+    server = new ViewerServer();
+    const url = await server.start();
+    const mesh = box([0, 0, 0], [1, 1, 1]);
+    const source = { code: "w = 1;\ncube(w);\n", file: "part.scad", params: ["w=2"] };
+    server.pushModel({ mesh, stats: computeStats(mesh), title: "With source", key: "a", source });
+    server.pushModel({ mesh, stats: computeStats(mesh), title: "Without", key: "b" });
+    const res = await fetch(`${url}/source/1`);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual(source);
+    expect((await fetch(`${url}/source/2`)).status).toBe(404);
+    expect((await fetch(`${url}/source/99`)).status).toBe(404);
+    expect(await rawGet(url, "/source/1", { Host: "evil.example" })).toBe(403);
+  });
+
   it("reports running state", async () => {
     server = new ViewerServer();
     expect(server.isRunning).toBe(false);
@@ -186,5 +201,11 @@ describe("buildSlicerCommand", () => {
     expect(buildSlicerCommand("orca", "C:\\m.stl", "win32")).toEqual({ cmd: "cmd", args: ["/c", "start", "", "orca-slicer", "C:\\m.stl"] });
     expect(buildSlicerCommand("cura", "/m.stl", "linux")).toEqual({ cmd: "cura", args: ["/m.stl"] });
     expect(() => buildSlicerCommand("evil; rm -rf /", "/m.stl", "linux")).toThrow(/Unknown slicer/);
+  });
+
+  it("hands chosen slicers a 3MF (colours included) and the system default app an STL", () => {
+    expect(slicerFileFormat("bambu")).toBe("3mf");
+    expect(slicerFileFormat("prusa")).toBe("3mf");
+    expect(slicerFileFormat("default")).toBe("stl");
   });
 });

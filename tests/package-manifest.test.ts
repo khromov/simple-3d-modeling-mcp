@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 // Same npm version the release workflow publishes with.
 const npm = ["--yes", "npm@12.2.2"];
-const PACKAGE = "@khromov/simple-3d-modeling-mcp";
+const PACKAGE = "sketchpad-3d-model-mcp";
 // npx is a .cmd shim on Windows, which execFile can only run through a shell.
 const shell = process.platform === "win32";
 
@@ -42,7 +42,7 @@ describe("npm package manifest", () => {
       "--dry-run",
       "--ignore-scripts",
     ]) as Record<string, PackResult>;
-    const packDir = mkdtempSync(join(tmpdir(), "simple-3d-modeling-pack-"));
+    const packDir = mkdtempSync(join(tmpdir(), "sketchpad-3d-model-pack-"));
 
     try {
       const packed = firstResult(npmJson([
@@ -58,9 +58,9 @@ describe("npm package manifest", () => {
       ));
 
       expect(publish.status, publish.stderr).toBe(0);
-      expect(publish.stderr).not.toContain("bin[simple-3d-modeling-mcp]");
+      expect(publish.stderr).not.toContain("bin[sketchpad-3d-model-mcp]");
       expect(packageManifest.bin).toEqual({
-        "simple-3d-modeling-mcp": "dist/index.js",
+        "sketchpad-3d-model-mcp": "dist/index.js",
       });
       expect(packManifest.files).toContainEqual(
         expect.objectContaining({ path: "dist/index.js" }),

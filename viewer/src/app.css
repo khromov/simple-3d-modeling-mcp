@@ -1,19 +1,168 @@
+/*
+ * Design tokens. Light is an architect's drawing: black ink on warm paper.
+ * Dark is a blueprint: white lines on cyanotype blue. Accents are Bauhaus
+ * primaries. The 3D canvas is transparent, so the viewport shows --paper too;
+ * the grid, edge and axis colours in src/lib/scene.ts are matched to these.
+ */
 :root {
-  --bg: #1a1a2e; --panel: #16162a; --border: #2a2a44; --text: #aaa; --muted: #666; --heading: #888;
-  --accent: #4a9eff; --accent-bg: rgba(74,158,255,0.15); --accent-border: rgba(74,158,255,0.3);
-  --btn-bg: rgba(255,255,255,0.08); --btn-border: rgba(255,255,255,0.15); --btn-hover: rgba(255,255,255,0.15);
+  color-scheme: light;
+  --paper: #f3efe6;
+  --paper-raised: #faf8f2;
+  --paper-sunk: #e7e2d6;
+  --ink: #161616;
+  --ink-soft: #55524b;
+  --ink-faint: #8b877c;
+  --hairline: rgb(22 22 22 / 0.16);
+  --shadow: #161616;
+  --accent: #d63c26;
+  --on-accent: #ffffff;
+  --axis-x: #d63c26;
+  --axis-y: #2e8b4f;
+  --axis-z: #2456b0;
+  --ok: #2e8b4f;
+  --bad: #c42f22;
+  --bauhaus-red: #d63c26;
+  --bauhaus-yellow: #f2b330;
+  --bauhaus-blue: #2456b0;
+  --grain-opacity: 0.08;
+  --grain-filter: none;
+  --vignette: rgb(110 90 50 / 0.1);
+  --code-keyword: #b8321c;
+  --code-builtin: #1f4fa3;
+  --code-number: #9a5b00;
+  --code-string: #2a7a45;
+  --code-special: #7b3a99;
+  --code-comment: #8b877c;
+
+  --font-sans: "Jost Variable", Futura, "Century Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --rule: 2px solid var(--ink);
+  --lift: 3px;
 }
-body.light {
-  --bg: #f0f0f0; --panel: #e8e8e8; --border: #d0d0d0; --text: #444; --muted: #888; --heading: #666;
-  --accent: #2a7de1; --btn-bg: rgba(0,0,0,0.06); --btn-border: rgba(0,0,0,0.12); --btn-hover: rgba(0,0,0,0.12);
+
+/* Blueprint tokens: chosen explicitly, or by the OS when nothing is chosen. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #143560;
+  --paper-raised: #193f6e;
+  --paper-sunk: #0f2c52;
+  --ink: #f0f5fc;
+  --ink-soft: #bccbe0;
+  --ink-faint: #89a2c6;
+  --hairline: rgb(240 245 252 / 0.22);
+  --shadow: #081b36;
+  --accent: #f6c445;
+  --on-accent: #10284a;
+  --axis-x: #ff5a45;
+  --axis-y: #2fd27a;
+  --axis-z: #5ba3ff;
+  --ok: #84e2a4;
+  --bad: #ff8a78;
+  --bauhaus-blue: #6ea6ff;
+  --grain-opacity: 0.13;
+  --grain-filter: invert(1);
+  --vignette: rgb(4 18 42 / 0.45);
+  --code-keyword: #ff8f7d;
+  --code-builtin: #8cc4ff;
+  --code-number: #ffcf70;
+  --code-string: #8fe3aa;
+  --code-special: #e4adff;
+  --code-comment: #89a2c6;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #143560;
+    --paper-raised: #193f6e;
+    --paper-sunk: #0f2c52;
+    --ink: #f0f5fc;
+    --ink-soft: #bccbe0;
+    --ink-faint: #89a2c6;
+    --hairline: rgb(240 245 252 / 0.22);
+    --shadow: #081b36;
+    --accent: #f6c445;
+    --on-accent: #10284a;
+    --axis-x: #ff5a45;
+    --axis-y: #2fd27a;
+    --axis-z: #5ba3ff;
+    --ok: #84e2a4;
+    --bad: #ff8a78;
+    --bauhaus-blue: #6ea6ff;
+    --grain-opacity: 0.13;
+    --grain-filter: invert(1);
+    --vignette: rgb(4 18 42 / 0.45);
+    --code-keyword: #ff8f7d;
+    --code-builtin: #8cc4ff;
+    --code-number: #ffcf70;
+    --code-string: #8fe3aa;
+    --code-special: #e4adff;
+    --code-comment: #89a2c6;
+  }
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; }
-body { background: var(--bg); color: var(--text); overflow: hidden; font-family: system-ui, sans-serif; display: flex; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  overflow: hidden;
+  font: 450 13px/1.4 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+/* Paper grain over the whole sheet, the model included, like a print (and over full-screen sheets, which sit above it). */
+body::after,
+dialog.sheet::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  background: url("./grain.svg");
+  opacity: var(--grain-opacity);
+  filter: var(--grain-filter);
+}
 canvas { display: block; } /* three.js creates the canvas, outside any component's scope */
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Shared by several components. */
-.row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
-.row .val { font-family: ui-monospace, monospace; }
-.btn { background: var(--btn-bg); border: 1px solid var(--btn-border); color: var(--text); border-radius: 5px; cursor: pointer; font-size: 11px; }
-.btn:hover { background: var(--btn-hover); }
+
+/* Chunky bordered button with a hard offset shadow that presses in. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  border: var(--rule);
+  box-shadow: var(--lift) var(--lift) 0 var(--shadow);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 80ms ease, box-shadow 80ms ease, background-color 80ms ease;
+}
+.btn:hover { background: var(--paper-sunk); }
+.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn:disabled { cursor: progress; }
+
+/* A small mono label in a box: versions, units, formats. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1.5px solid currentColor;
+  font: 500 10px/1.3 var(--font-mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

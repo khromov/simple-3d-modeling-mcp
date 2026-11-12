@@ -1,7 +1,8 @@
 import type { ModelUpdate } from "./protocol.js";
 
-export function formatMm(v: number): string {
-  return `${Math.round(v * 100) / 100} mm`;
+/** A length in mm, rounded to 0.01; the sidebar shows the unit once, in the heading. */
+export function formatLength(v: number): string {
+  return String(Math.round(v * 100) / 100);
 }
 
 /** 2D models are extruded 1 mm thick, so their "volume" in mm³ is the area in mm². */
