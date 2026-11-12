@@ -3,6 +3,7 @@
  * Populates ./assets with the files the WASM engine mounts into OpenSCAD's
  * virtual filesystem:
  *
+ *   assets/openscad/           OpenSCAD's official WebAssembly build (nightly snapshot, pinned date, sha256-verified)
  *   assets/fonts/              DejaVu TTFs (from the dejavu-fonts-ttf devDependency)
  *   assets/libraries/BOSL2/    BOSL2 library (downloaded at a pinned tag, sha256-verified)
  *   assets/vendor/three/       the three.js files the browser viewer loads (from the three devDependency)
@@ -17,10 +18,20 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import AdmZip from "adm-zip";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ASSETS = join(ROOT, "assets");
 const MANIFEST = join(ASSETS, "manifest.json");
+
+// The "web" variant is an ES module factory plus a separate .wasm, run in-process
+// on a virtual filesystem. (The "node" variant is a CLI with host filesystem access.)
+// files.openscad.org keeps dated snapshots for months, not forever: bump when a pin disappears.
+const OPENSCAD = {
+  version: "2026.11.12",
+  url: "https://files.openscad.org/snapshots/OpenSCAD-2026.11.12-WebAssembly-web.zip",
+  sha256: "bcc2f87ee5e871aa22dedf68777dd8ef845e0353033678efaf8bda8dae7b4d80",
+};
 
 const BOSL2 = {
   tag: "v2.0.785",
@@ -52,7 +63,7 @@ const THREE_FILES = {
   LICENSE: "LICENSE",
 };
 
-const wanted = { bosl2: BOSL2.tag, fonts: fontVersion, fontFiles: FONT_FILES, three: threeVersion };
+const wanted = { openscad: OPENSCAD.version, bosl2: BOSL2.tag, fonts: fontVersion, fontFiles: FONT_FILES, three: threeVersion };
 
 if (existsSync(MANIFEST)) {
   try {
@@ -83,14 +94,29 @@ for (const [dest, src] of Object.entries(THREE_FILES)) {
 }
 console.log(`assets: copied three.js ${threeVersion} viewer files`);
 
+// --- OpenSCAD (WebAssembly) --------------------------------------------------
+const zip = await download("OpenSCAD", OPENSCAD.url, OPENSCAD.sha256);
+const openscadDir = join(ASSETS, "openscad");
+mkdirSync(openscadDir, { recursive: true });
+const archive = new AdmZip(zip);
+const zipFile = (name) => {
+  const entry = archive.getEntry(name);
+  if (!entry) throw new Error(`OpenSCAD zip is missing ${name}`);
+  return entry.getData();
+};
+// .mjs: the glue is an ES module, whatever package.json ends up next to it.
+writeFileSync(join(openscadDir, "openscad.mjs"), zipFile("openscad.js"));
+writeFileSync(join(openscadDir, "openscad.wasm"), zipFile("openscad.wasm"));
+writeFileSync(
+  join(openscadDir, "NOTICE"),
+  `OpenSCAD ${OPENSCAD.version} compiled to WebAssembly by the OpenSCAD project.\n` +
+    `Downloaded from ${OPENSCAD.url}\n(sha256 ${OPENSCAD.sha256}).\n\n` +
+    "OpenSCAD is free software. Source code and license: https://github.com/openscad/openscad\n",
+);
+console.log(`assets: extracted OpenSCAD ${OPENSCAD.version} (WebAssembly)`);
+
 // --- BOSL2 -----------------------------------------------------------------
-const res = await fetch(BOSL2.url);
-if (!res.ok) throw new Error(`BOSL2 download failed: HTTP ${res.status}`);
-const tgz = Buffer.from(await res.arrayBuffer());
-const digest = createHash("sha256").update(tgz).digest("hex");
-if (digest !== BOSL2.sha256) {
-  throw new Error(`BOSL2 checksum mismatch: expected ${BOSL2.sha256}, got ${digest}`);
-}
+const tgz = await download("BOSL2", BOSL2.url, BOSL2.sha256);
 
 const libDir = join(ASSETS, "libraries", "BOSL2");
 mkdirSync(libDir, { recursive: true });
@@ -109,6 +135,16 @@ if (count < 10) throw new Error(`BOSL2 extraction looks wrong (${count} files)`)
 console.log(`assets: extracted BOSL2 ${BOSL2.tag} (${count} files)`);
 
 writeFileSync(MANIFEST, JSON.stringify(wanted, null, 2) + "\n");
+
+/** Downloads a file and checks it against a pinned SHA-256. */
+async function download(label, url, sha256) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${label} download failed: HTTP ${res.status} (${url})`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const digest = createHash("sha256").update(buf).digest("hex");
+  if (digest !== sha256) throw new Error(`${label} checksum mismatch: expected ${sha256}, got ${digest}`);
+  return buf;
+}
 
 /** Minimal ustar reader: yields regular files only. */
 function* readTar(buf) {

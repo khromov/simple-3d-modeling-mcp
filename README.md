@@ -24,7 +24,7 @@ Based on [mazzanfar/simple-3d-modeling-mcp](https://github.com/mazzanfar/simple-
 - **Colours** — `color()` shows up in previews, the viewer and 3MF exports.
 - **BOSL2 and `text()`** — `include <BOSL2/std.scad>` and `text("…")` work out of the box.
 - **Live browser viewer** — rotate/zoom/pan, model history, dimensions, STL/3MF download, open in your slicer. Runs locally, works offline.
-- **Real files** — export STL, 3MF, OBJ, OFF, AMF (and SVG/DXF for 2D designs) to a folder you choose; save and render `.scad` files with relative `include`/`use`.
+- **Real files** — export STL, 3MF, OBJ, OFF (and SVG/DXF for 2D designs) to a folder you choose; save and render `.scad` files with relative `include`/`use`.
 - **Native OpenSCAD when it helps** — a Manifold-capable OpenSCAD install (2024+/nightly) is used automatically for OpenGL-quality previews and your own libraries.
 
 ## Quick Start
@@ -84,7 +84,7 @@ Requires Node.js 22, 24 or 26 (LTS).
 | `render` | Render code or a `.scad` file to a PNG preview, with size/bounds/volume, `echo()` output and warnings. Views: `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, rotation angles, or an OpenSCAD camera string. |
 | `render_multiview` | Labelled grid of views (default: front, right, top in orthographic + perspective) |
 | `render_turntable` | 360° turntable animation (animated PNG) |
-| `export` | Export to STL, 3MF (with colours), OBJ, OFF, AMF, SVG, DXF or CSG on disk. Never overwrites unless asked. |
+| `export` | Export to STL, 3MF (with colours), OBJ, OFF, SVG, DXF or CSG on disk (AMF and PDF need an installed OpenSCAD that supports them). Never overwrites unless asked. |
 | `validate` | Fast check for syntax errors, failed `assert()`s and unknown variables |
 | `open_viewer` | Open the interactive 3D viewer in the browser |
 | `save_scad_file` | Save OpenSCAD source to a `.scad` file |
@@ -131,7 +131,7 @@ The viewer listens on `127.0.0.1` only and rejects requests from other web pages
 
 | Engine | When it's used | Notes |
 |--------|----------------|-------|
-| **WASM** (bundled) | Default | OpenSCAD 2025 with Manifold, BOSL2 and DejaVu fonts (Liberation Sans maps to DejaVu Sans). Previews come from the built-in renderer. Each job runs in a worker thread with a timeout. |
+| **WASM** (bundled) | Default | OpenSCAD's official WebAssembly build (a pinned nightly snapshot) with Manifold, BOSL2 and DejaVu fonts (Liberation Sans maps to DejaVu Sans). Previews come from the built-in renderer. Each job runs in a worker thread with a timeout. |
 | **Native** | `OPENSCAD_PATH` is set, or a Manifold-capable OpenSCAD is found on the PATH / in the usual install locations | OpenGL previews from OpenSCAD itself, your installed libraries, plus the bundled BOSL2 if you don't have it. An older OpenSCAD (e.g. 2021.01) is *not* picked automatically because the bundled engine is much faster — set `OPENSCAD_PATH` to use it anyway. |
 
 `get_version` shows which engine is active and why.
@@ -192,4 +192,4 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 
 ## License
 
-GPL-2.0 (required by the openscad-wasm dependency). Bundled third-party assets keep their own licenses, included alongside them: BOSL2 (BSD-2-Clause), DejaVu fonts (Bitstream Vera / public domain), three.js (MIT).
+GPL-2.0 (required by the bundled OpenSCAD). Bundled third-party assets keep their own licenses, included alongside them: OpenSCAD's WebAssembly build (GPL, see [openscad/openscad](https://github.com/openscad/openscad)), BOSL2 (BSD-2-Clause), DejaVu fonts (Bitstream Vera / public domain), three.js (MIT).

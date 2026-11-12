@@ -35,6 +35,8 @@ export const PACKAGE_VERSION: string = PACKAGE_JSON.version;
 export const ASSETS_DIR = join(PACKAGE_ROOT, "assets");
 export const FONTS_DIR = join(ASSETS_DIR, "fonts");
 export const LIBRARIES_DIR = join(ASSETS_DIR, "libraries");
+/** OpenSCAD's official WebAssembly build: openscad.mjs (Emscripten glue) + openscad.wasm. */
+export const OPENSCAD_WASM_DIR = join(ASSETS_DIR, "openscad");
 
 /** Names of libraries bundled under assets/libraries (e.g. ["BOSL2"]). */
 export function bundledLibraries(): string[] {

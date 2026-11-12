@@ -8,7 +8,7 @@ set -euo pipefail
 #   manifest.json
 #   server/package.json
 #   server/dist/…            compiled server
-#   server/assets/…          fonts + BOSL2 for the WASM engine
+#   server/assets/…          OpenSCAD WASM + fonts + BOSL2 for the WASM engine
 #   server/node_modules/…    production dependencies
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

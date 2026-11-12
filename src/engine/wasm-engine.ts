@@ -7,11 +7,10 @@
  */
 
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { posix, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
-import { FONTS_DIR, LIBRARIES_DIR, bundledLibraries, bundledLibraryVersion } from "../paths.js";
+import { FONTS_DIR, LIBRARIES_DIR, OPENSCAD_WASM_DIR, bundledLibraries, bundledLibraryVersion } from "../paths.js";
 import { BaseEngine, timeoutMessage } from "./base-engine.js";
 import { parseLog, rewritePaths } from "./output.js";
 import { paramArgs } from "./params.js";
@@ -152,7 +151,8 @@ export class WasmEngine extends BaseEngine {
   readonly capabilities: EngineCapabilities = {
     png: false,
     manifold: true,
-    exportFormats: ["stl", "off", "obj", "amf", "dxf", "svg", "csg"],
+    // No amf: OpenSCAD removed AMF in its 2026.09 snapshots.
+    exportFormats: ["stl", "off", "obj", "dxf", "svg", "csg"],
   };
   readonly timeoutMs: number;
   private readonly pool: WorkerPool;
@@ -162,9 +162,13 @@ export class WasmEngine extends BaseEngine {
   constructor(opts: WasmEngineOptions = {}) {
     super();
     this.timeoutMs = opts.timeoutMs ?? 120_000;
-    const require = createRequire(import.meta.url);
+    const wasmPath = join(OPENSCAD_WASM_DIR, "openscad.wasm");
+    if (!existsSync(wasmPath)) {
+      throw new Error(`Bundled OpenSCAD WebAssembly not found at ${wasmPath}. Run \`npm run assets\`.`);
+    }
     const init: WorkerInit = {
-      openscadUrl: pathToFileURL(require.resolve("openscad-wasm")).href,
+      openscadUrl: pathToFileURL(join(OPENSCAD_WASM_DIR, "openscad.mjs")).href,
+      wasmPath,
       fontsDir: FONTS_DIR,
       librariesDir: LIBRARIES_DIR,
     };

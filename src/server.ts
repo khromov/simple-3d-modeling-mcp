@@ -394,7 +394,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
       name: "export",
       title: "Export model file",
       description:
-        "Export the model to a file on disk (STL, 3MF with colours, OBJ, OFF, AMF; DXF/SVG for 2D designs). Writes to `path`, or to the default output folder, and never overwrites unless overwrite=true.",
+        "Export the model to a file on disk (STL, 3MF with colours, OBJ, OFF; DXF/SVG for 2D designs). Writes to `path`, or to the default output folder, and never overwrites unless overwrite=true.",
       schema: z.object({
         ...sourceShape,
         format: z.enum(EXPORT_FORMATS).optional().describe("File format (default: taken from `path`'s extension, else stl). 3mf keeps color() colours."),

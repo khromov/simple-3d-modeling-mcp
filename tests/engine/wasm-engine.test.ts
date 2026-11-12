@@ -92,9 +92,12 @@ describe("WasmEngine", () => {
     const svg = await engine.exportFormat(src("square([10, 5]);"), "svg");
     expect(svg.ok).toBe(true);
     expect(new TextDecoder().decode(svg.bytes)).toContain("<svg");
-    const amf = await engine.exportFormat(src("cube(3);"), "amf");
-    expect(amf.ok).toBe(true);
+    const csg = await engine.exportFormat(src("cube(3);"), "csg");
+    expect(csg.ok).toBe(true);
+    expect(new TextDecoder().decode(csg.bytes)).toContain("cube(");
     await expect(engine.exportFormat(src("cube(3);"), "pdf")).rejects.toThrow(/cannot export "pdf"/);
+    // OpenSCAD dropped AMF in its 2026.09 snapshots.
+    await expect(engine.exportFormat(src("cube(3);"), "amf")).rejects.toThrow(/cannot export "amf"/);
   });
 
   it("validates code, including assert()", async () => {

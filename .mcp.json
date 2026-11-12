@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "simple-3d-modeling-local": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"]
+    },
+    "svelte": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@sveltejs/mcp"]
+    }
+  }
+}

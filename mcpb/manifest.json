@@ -4,7 +4,7 @@
   "display_name": "Simple 3D Modeling",
   "version": "1.0.0",
   "description": "Create, preview and export 3D models through conversation. Zero setup — OpenSCAD runs bundled via WebAssembly, with BOSL2 and fonts included.",
-  "long_description": "Write OpenSCAD models with your AI assistant and see them instantly: inline previews with dimensions, labelled multi-view grids, turntable animations and a live 3D viewer in your browser. Export STL, 3MF (with colours), OBJ, AMF, SVG or DXF straight to a folder of your choice. Uses an installed OpenSCAD automatically when it has the fast Manifold backend.",
+  "long_description": "Write OpenSCAD models with your AI assistant and see them instantly: inline previews with dimensions, labelled multi-view grids, turntable animations and a live 3D viewer in your browser. Export STL, 3MF (with colours), OBJ, SVG or DXF straight to a folder of your choice. Uses an installed OpenSCAD automatically when it has the fast Manifold backend.",
   "author": {
     "name": "mazzanfar",
     "url": "https://github.com/mazzanfar"
@@ -76,7 +76,7 @@
     },
     {
       "name": "export",
-      "description": "Export STL, 3MF (with colours), OBJ, OFF, AMF, SVG or DXF to disk"
+      "description": "Export STL, 3MF (with colours), OBJ, OFF, SVG or DXF to disk"
     },
     {
       "name": "validate",
