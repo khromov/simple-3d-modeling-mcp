@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "simple-3d-modeling",
   "display_name": "Simple 3D Modeling",
-  "version": "1.2.14",
+  "version": "1.0.0",
   "description": "Create, preview and export 3D models through conversation. Zero setup — OpenSCAD runs bundled via WebAssembly, with BOSL2 and fonts included.",
   "long_description": "Write OpenSCAD models with your AI assistant and see them instantly: inline previews with dimensions, labelled multi-view grids, turntable animations and a live 3D viewer in your browser. Export STL, 3MF (with colours), OBJ, AMF, SVG or DXF straight to a folder of your choice. Uses an installed OpenSCAD automatically when it has the fast Manifold backend.",
   "author": {
@@ -11,18 +11,28 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mazzanfar/simple-3d-modeling-mcp.git"
+    "url": "https://github.com/khromov/simple-3d-modeling-mcp.git"
   },
-  "homepage": "https://github.com/mazzanfar/simple-3d-modeling-mcp",
-  "support": "https://github.com/mazzanfar/simple-3d-modeling-mcp/issues",
-  "keywords": ["3d-modeling", "openscad", "cad", "stl", "3mf", "3d-printing", "bosl2"],
+  "homepage": "https://github.com/khromov/simple-3d-modeling-mcp",
+  "support": "https://github.com/khromov/simple-3d-modeling-mcp/issues",
+  "keywords": [
+    "3d-modeling",
+    "openscad",
+    "cad",
+    "stl",
+    "3mf",
+    "3d-printing",
+    "bosl2"
+  ],
   "license": "GPL-2.0",
   "server": {
     "type": "node",
     "entry_point": "server/dist/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/server/dist/index.js"],
+      "args": [
+        "${__dirname}/server/dist/index.js"
+      ],
       "env": {
         "OPENSCAD_OUTPUT_DIR": "${user_config.output_dir}",
         "OPENSCAD_AUTO_OPEN_VIEWER": "${user_config.auto_open_viewer}",
@@ -52,21 +62,58 @@
     }
   },
   "tools": [
-    { "name": "render", "description": "Render a PNG preview with size, bounds, volume and echo output" },
-    { "name": "render_multiview", "description": "Labelled grid of orthographic and perspective views" },
-    { "name": "render_turntable", "description": "360° turntable animation" },
-    { "name": "export", "description": "Export STL, 3MF (with colours), OBJ, OFF, AMF, SVG or DXF to disk" },
-    { "name": "validate", "description": "Fast syntax and assert() check" },
-    { "name": "open_viewer", "description": "Open the interactive 3D viewer in the browser" },
-    { "name": "cheatsheet", "description": "OpenSCAD and BOSL2 quick reference" },
-    { "name": "list_libraries", "description": "List bundled and installed OpenSCAD libraries" },
-    { "name": "get_version", "description": "Engine, backend and settings info" },
-    { "name": "read_scad_file", "description": "Read a .scad file" },
-    { "name": "save_scad_file", "description": "Save OpenSCAD source to a .scad file" }
+    {
+      "name": "render",
+      "description": "Render a PNG preview with size, bounds, volume and echo output"
+    },
+    {
+      "name": "render_multiview",
+      "description": "Labelled grid of orthographic and perspective views"
+    },
+    {
+      "name": "render_turntable",
+      "description": "360° turntable animation"
+    },
+    {
+      "name": "export",
+      "description": "Export STL, 3MF (with colours), OBJ, OFF, AMF, SVG or DXF to disk"
+    },
+    {
+      "name": "validate",
+      "description": "Fast syntax and assert() check"
+    },
+    {
+      "name": "open_viewer",
+      "description": "Open the interactive 3D viewer in the browser"
+    },
+    {
+      "name": "cheatsheet",
+      "description": "OpenSCAD and BOSL2 quick reference"
+    },
+    {
+      "name": "list_libraries",
+      "description": "List bundled and installed OpenSCAD libraries"
+    },
+    {
+      "name": "get_version",
+      "description": "Engine, backend and settings info"
+    },
+    {
+      "name": "read_scad_file",
+      "description": "Read a .scad file"
+    },
+    {
+      "name": "save_scad_file",
+      "description": "Save OpenSCAD source to a .scad file"
+    }
   ],
   "tools_generated": false,
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.13.1 <27"
     }

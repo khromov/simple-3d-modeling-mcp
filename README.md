@@ -1,19 +1,21 @@
 # simple-3d-modeling-mcp
 
-[![npm version](https://img.shields.io/npm/v/simple-3d-modeling-mcp)](https://www.npmjs.com/package/simple-3d-modeling-mcp)
-[![npm provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/simple-3d-modeling-mcp#provenance)
-[![CI](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/ci.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mazzanfar/simple-3d-modeling-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/mazzanfar/simple-3d-modeling-mcp)
-[![CodeQL](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/codeql.yml)
+[![npm version](https://img.shields.io/npm/v/@khromov/simple-3d-modeling-mcp)](https://www.npmjs.com/package/@khromov/simple-3d-modeling-mcp)
+[![npm provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/@khromov/simple-3d-modeling-mcp#provenance)
+[![CI](https://github.com/khromov/simple-3d-modeling-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/khromov/simple-3d-modeling-mcp/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/khromov/simple-3d-modeling-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/khromov/simple-3d-modeling-mcp)
+[![CodeQL](https://github.com/khromov/simple-3d-modeling-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/khromov/simple-3d-modeling-mcp/actions/workflows/codeql.yml)
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-green.svg)](https://opensource.org/licenses/GPL-2.0)
 
-[![Install with Claude Desktop](https://img.shields.io/badge/Install%20with-Claude%20Desktop-orange?style=for-the-badge&logo=claude)](https://github.com/mazzanfar/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb)
+[![Install with Claude Desktop](https://img.shields.io/badge/Install%20with-Claude%20Desktop-orange?style=for-the-badge&logo=claude)](https://github.com/khromov/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb)
 
 An MCP (Model Context Protocol) server that lets anyone create, iterate on, and export 3D models through natural conversation with an LLM. Works with **any MCP-compatible client** — Claude, ChatGPT, Codex, and more. **Zero setup** — OpenSCAD is bundled via WebAssembly, together with the BOSL2 library and fonts.
 
+Based on [mazzanfar/simple-3d-modeling-mcp](https://github.com/mazzanfar/simple-3d-modeling-mcp).
+
 ## Features
 
-- **Zero setup** — `npx simple-3d-modeling-mcp` and go. No OpenSCAD install, no PATH configuration.
+- **Zero setup** — `npx @khromov/simple-3d-modeling-mcp` and go. No OpenSCAD install, no PATH configuration.
 - **Fast** — uses OpenSCAD's Manifold geometry backend; booleans that took over a minute with CGAL finish in well under a second. Repeat renders of the same code are cached.
 - **Previews the model can reason about** — every render returns the image *and* the model's size, bounds, volume, triangle count, `echo()` output and warnings, so the AI can check “is it really 80 mm wide?”.
 - **Real error messages** — OpenSCAD's own errors (with line numbers) plus hints, so the AI can fix its code.
@@ -31,7 +33,7 @@ This server speaks the standard [Model Context Protocol](https://modelcontextpro
 
 ### Claude Desktop
 
-**Easiest:** download [simple-3d-modeling.mcpb](https://github.com/mazzanfar/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb) and double-click it. The extension settings let you pick the export folder, turn off the automatic browser viewer, or point at an installed OpenSCAD.
+**Easiest:** download [simple-3d-modeling.mcpb](https://github.com/khromov/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb) and double-click it. The extension settings let you pick the export folder, turn off the automatic browser viewer, or point at an installed OpenSCAD.
 
 Or add it to `claude_desktop_config.json` manually:
 
@@ -40,7 +42,7 @@ Or add it to `claude_desktop_config.json` manually:
   "mcpServers": {
     "simple-3d-modeling": {
       "command": "npx",
-      "args": ["-y", "simple-3d-modeling-mcp"]
+      "args": ["-y", "@khromov/simple-3d-modeling-mcp"]
     }
   }
 }
@@ -49,7 +51,7 @@ Or add it to `claude_desktop_config.json` manually:
 ### Claude Code
 
 ```bash
-claude mcp add simple-3d-modeling -- npx -y simple-3d-modeling-mcp
+claude mcp add simple-3d-modeling -- npx -y @khromov/simple-3d-modeling-mcp
 ```
 
 ### ChatGPT Desktop (macOS)
@@ -57,12 +59,12 @@ claude mcp add simple-3d-modeling -- npx -y simple-3d-modeling-mcp
 Go to **Settings → MCP Servers → Add Server**, then enter:
 
 - **Name:** `simple-3d-modeling`
-- **Command:** `npx -y simple-3d-modeling-mcp`
+- **Command:** `npx -y @khromov/simple-3d-modeling-mcp`
 
 ### OpenAI Codex CLI
 
 ```bash
-codex mcp add simple-3d-modeling -- npx -y simple-3d-modeling-mcp
+codex mcp add simple-3d-modeling -- npx -y @khromov/simple-3d-modeling-mcp
 ```
 
 ### Other MCP Clients (Cursor, Windsurf, etc.)
@@ -70,7 +72,7 @@ codex mcp add simple-3d-modeling -- npx -y simple-3d-modeling-mcp
 Any client that supports MCP over stdio can use this server:
 
 ```bash
-npx -y simple-3d-modeling-mcp
+npx -y @khromov/simple-3d-modeling-mcp
 ```
 
 Requires Node.js 22, 24 or 26 (LTS).
@@ -183,6 +185,10 @@ npm run build:mcpb   # Claude Desktop extension bundle
 ```
 
 `npm run assets` populates `assets/` (git-ignored): DejaVu fonts from the `dejavu-fonts-ttf` package, the three.js files the viewer needs, and BOSL2 downloaded from GitHub at a pinned tag and verified against a SHA-256 checksum.
+
+### Releasing
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please). Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `feat!:` …) on `main`; release-please keeps a release PR open with the next version and changelog. Merging it tags the release, publishes to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC, with provenance — no npm token is stored), and attaches `simple-3d-modeling.mcpb` to the GitHub release.
 
 ## License
 

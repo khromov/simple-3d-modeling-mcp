@@ -7,7 +7,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PACKAGE_NAME = "simple-3d-modeling-mcp";
+/** Matches "simple-3d-modeling-mcp" and scoped copies such as "@khromov/simple-3d-modeling-mcp". */
+const PACKAGE_NAME_RE = /^(@[^/]+\/)?simple-3d-modeling-mcp$/;
 
 function findPackageRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -15,7 +16,7 @@ function findPackageRoot(): string {
     const candidate = join(dir, "package.json");
     if (existsSync(candidate)) {
       try {
-        if (JSON.parse(readFileSync(candidate, "utf8")).name === PACKAGE_NAME) return dir;
+        if (PACKAGE_NAME_RE.test(JSON.parse(readFileSync(candidate, "utf8")).name)) return dir;
       } catch {
         // keep walking
       }
@@ -24,11 +25,13 @@ function findPackageRoot(): string {
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error(`Could not locate the ${PACKAGE_NAME} package root`);
+  throw new Error("Could not locate the simple-3d-modeling-mcp package root");
 }
 
 export const PACKAGE_ROOT = findPackageRoot();
-export const PACKAGE_VERSION: string = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
+const PACKAGE_JSON = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
+export const PACKAGE_NAME: string = PACKAGE_JSON.name;
+export const PACKAGE_VERSION: string = PACKAGE_JSON.version;
 export const ASSETS_DIR = join(PACKAGE_ROOT, "assets");
 export const FONTS_DIR = join(ASSETS_DIR, "fonts");
 export const LIBRARIES_DIR = join(ASSETS_DIR, "libraries");

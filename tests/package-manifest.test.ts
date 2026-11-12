@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const npm11 = ["--yes", "npm@11.21.1"];
+// Same npm version the release workflow publishes with.
+const npm = ["--yes", "npm@12.2.2"];
+const PACKAGE = "@khromov/simple-3d-modeling-mcp";
 // npx is a .cmd shim on Windows, which execFile can only run through a shell.
 const shell = process.platform === "win32";
 
@@ -13,23 +15,28 @@ interface PackResult {
   files: Array<{ path: string }>;
 }
 
+/** npm 11 prints an array for `pack --json`; npm 12 an object keyed by package name. */
+function firstResult(json: unknown): PackResult {
+  return (Array.isArray(json) ? json[0] : Object.values(json as Record<string, PackResult>)[0]) as PackResult;
+}
+
 function npmJson(args: string[]): unknown {
-  return JSON.parse(execFileSync("npx", [...npm11, ...args, "--json"], {
+  return JSON.parse(execFileSync("npx", [...npm, ...args, "--json"], {
     encoding: "utf8",
     shell,
   }));
 }
 
 describe("npm package manifest", () => {
-  it("keeps the CLI bin in npm 11 pack and publish dry runs", () => {
-    execFileSync("npx", [...npm11, "run", "build"], { shell });
+  it("keeps the CLI bin in npm pack and publish dry runs", () => {
+    execFileSync("npx", [...npm, "run", "build"], { shell });
 
     const publish = spawnSync(
       "npx",
-      [...npm11, "publish", "--dry-run", "--ignore-scripts", "--loglevel=warn"],
+      [...npm, "publish", "--dry-run", "--ignore-scripts", "--loglevel=warn"],
       { encoding: "utf8", shell },
     );
-    const packManifest = npmJson(["pack", "--dry-run", "--ignore-scripts"]) as PackResult[];
+    const packManifest = firstResult(npmJson(["pack", "--dry-run", "--ignore-scripts"]));
     const publishManifest = npmJson([
       "publish",
       "--dry-run",
@@ -38,15 +45,15 @@ describe("npm package manifest", () => {
     const packDir = mkdtempSync(join(tmpdir(), "simple-3d-modeling-pack-"));
 
     try {
-      const packed = npmJson([
+      const packed = firstResult(npmJson([
         "pack",
         "--ignore-scripts",
         "--pack-destination",
         packDir,
-      ]) as PackResult[];
+      ]));
       const packageManifest = JSON.parse(execFileSync(
         "tar",
-        ["-xOf", join(packDir, packed[0].filename), "package/package.json"],
+        ["-xOf", join(packDir, packed.filename), "package/package.json"],
         { encoding: "utf8" },
       ));
 
@@ -55,15 +62,18 @@ describe("npm package manifest", () => {
       expect(packageManifest.bin).toEqual({
         "simple-3d-modeling-mcp": "dist/index.js",
       });
-      expect(packManifest[0].files).toContainEqual(
+      expect(packManifest.files).toContainEqual(
         expect.objectContaining({ path: "dist/index.js" }),
       );
       // The WASM worker and the bundled fonts / BOSL2 must ship with the package.
       for (const path of ["dist/engine/wasm-worker.js", "assets/manifest.json", "assets/fonts/DejaVuSans.ttf", "assets/libraries/BOSL2/std.scad", "assets/libraries/BOSL2/LICENSE", "assets/vendor/three/three.core.js", "assets/vendor/three/addons/controls/OrbitControls.js"]) {
-        expect(packManifest[0].files).toContainEqual(expect.objectContaining({ path }));
+        expect(packManifest.files).toContainEqual(expect.objectContaining({ path }));
       }
-      expect(packManifest[0].files.some((f) => f.path.startsWith("tests/"))).toBe(false);
-      expect(publishManifest["simple-3d-modeling-mcp"].files).toContainEqual(
+      expect(packManifest.files.some((f) => f.path.startsWith("tests/"))).toBe(false);
+      expect(packageManifest.name).toBe(PACKAGE);
+      expect(packageManifest.publishConfig).toEqual({ access: "public" });
+      expect(packageManifest.repository.url).toBe("git+https://github.com/khromov/simple-3d-modeling-mcp.git");
+      expect(publishManifest[PACKAGE].files).toContainEqual(
         expect.objectContaining({ path: "dist/index.js" }),
       );
     } finally {

@@ -21,7 +21,7 @@ import { UserError } from "./errors.js";
 import { formatStats } from "./geometry/stats.js";
 import { write3mf, writeBinaryStl, writeObj, writeOff } from "./geometry/writers.js";
 import { ModelService, type Model } from "./model-service.js";
-import { bundledLibraries, bundledLibraryVersion, PACKAGE_VERSION } from "./paths.js";
+import { bundledLibraries, bundledLibraryVersion, PACKAGE_NAME, PACKAGE_VERSION } from "./paths.js";
 import { parseView, resolvePreset, VIEW_HELP, VIEW_NAMES, type PresetView } from "./rendering/camera.js";
 import { renderMultiView, renderPreview, renderTurntable } from "./rendering/previews.js";
 import { ViewerServer } from "./viewer/index.js";
@@ -526,7 +526,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
       const engine = await enginePromise;
       const info = await engine.describe();
       const rows = Object.entries({
-        Server: `simple-3d-modeling-mcp ${PACKAGE_VERSION}`,
+        Server: `${PACKAGE_NAME} ${PACKAGE_VERSION}`,
         ...info,
         "Export folder": opts.outputDir,
         Viewer: viewer.url ?? (autoOpen ? "opens on first render" : "starts on first render (auto-open disabled)"),

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": false,
+  "bootstrap-sha": "b16c47196251e8154e0c0ad9d562151bac1bea96",
+  "packages": {
+    ".": {
+      "package-name": "@khromov/simple-3d-modeling-mcp",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "mcpb/manifest.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}

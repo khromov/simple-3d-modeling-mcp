@@ -1,28 +1,61 @@
 name: Release
 
+# release-please keeps a release PR open on main (version bump + CHANGELOG,
+# from Conventional Commits). Merging it tags the release, and the publish job
+# then ships it to npm via trusted publishing (OIDC — no npm token stored) and
+# attaches the Claude Desktop .mcpb bundle to the GitHub release.
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
-    permissions:
-      id-token: write
-      contents: write
+  release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
-      # Release tooling uses the newer supported LTS; the package supports patched Node 22 and 24 LTS lines.
-      - uses: actions/setup-node@v6
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload the .mcpb to the GitHub release
+      id-token: write # npm trusted publishing (OIDC) + provenance
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      # Release tooling uses the newer supported LTS; the package supports Node 22, 24 and 26.
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Use npm 11
-        run: npm install --global npm@11
+      # Trusted publishing needs npm >= 11.5.1; keep in sync with tests/package-manifest.test.ts.
+      - name: Use npm 12
+        run: npm install --global npm@12.2.2
 
       - name: Install dependencies
         run: npm ci
@@ -30,19 +63,21 @@ jobs:
       - name: Type-check
         run: npm run assets && npm run typecheck
 
-      - name: Run tests
+      - name: Test
         run: npm test
 
       - name: Build
         run: npm run build
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC trusted publishing)
         run: npm publish --provenance
 
       - name: Build .mcpb bundle
         run: npm run build:mcpb
 
-      - name: Upload .mcpb to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: simple-3d-modeling.mcpb
+      - name: Attach .mcpb to the GitHub release
+        run: gh release upload "$TAG" simple-3d-modeling.mcpb --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
