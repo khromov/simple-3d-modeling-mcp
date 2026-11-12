@@ -51,7 +51,6 @@
   "license": "GPL-2.0",
   "dependencies": {
     "@tmcp/transport-stdio": "^0.5.1",
-    "openscad-wasm": "^0.0.4",
     "tmcp": "^1.20.1",
     "ws": "^8.22.2",
     "zod": "^4.6.7"
@@ -60,6 +59,7 @@
     "@tmcp/transport-in-memory": "^0.1.1",
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
+    "adm-zip": "^0.6.1",
     "dejavu-fonts-ttf": "^2.37.3",
     "three": "^0.187.0",
     "typescript": "^7.0.2",

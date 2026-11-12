@@ -14,8 +14,10 @@ import { join } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 
 export interface WorkerInit {
-  /** file:// URL of openscad-wasm's entry module. */
+  /** file:// URL of OpenSCAD's Emscripten ES module (default export: module factory). */
   openscadUrl: string;
+  /** Path of openscad.wasm: compiled once per worker, instantiated once per job. */
+  wasmPath: string;
   fontsDir: string;
   librariesDir: string;
 }
@@ -41,7 +43,7 @@ export interface WorkerReply {
 }
 
 type FileList = Array<[string, Uint8Array]>;
-type CreateOpenSCAD = (opts: Record<string, unknown>) => Promise<{ getInstance(): any }>;
+type CreateOpenSCAD = (opts: Record<string, unknown>) => Promise<any>;
 
 const FONTS_CONF = `<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
@@ -63,6 +65,7 @@ const FONTS_CONF = `<?xml version="1.0"?>
 
 const init = workerData as WorkerInit;
 let createOpenSCAD: CreateOpenSCAD | undefined;
+let wasmModule: Promise<WebAssembly.Module> | undefined;
 let fontFiles: FileList | undefined;
 const libraryFiles = new Map<string, FileList>();
 
@@ -89,14 +92,19 @@ function parentDir(p: string): string {
 }
 
 async function runJob(job: WorkerJob): Promise<WorkerReply> {
-  createOpenSCAD ??= (await import(init.openscadUrl)).createOpenSCAD as CreateOpenSCAD;
+  createOpenSCAD ??= (await import(init.openscadUrl)).default as CreateOpenSCAD;
+  wasmModule ??= WebAssembly.compile(readFileSync(init.wasmPath));
+  const mod = await wasmModule;
   const lines: string[] = [];
-  const wrapper = await createOpenSCAD({
+  const inst = await createOpenSCAD({
     noInitialRun: true,
     print: (t: string) => lines.push(t),
     printErr: (t: string) => lines.push(t),
+    instantiateWasm(imports: WebAssembly.Imports, done: (instance: WebAssembly.Instance) => void) {
+      WebAssembly.instantiate(mod, imports).then(done);
+      return {};
+    },
   });
-  const inst = wrapper.getInstance();
   const FS = inst.FS;
   const write = (path: string, data: Uint8Array | string) => {
     FS.mkdirTree(parentDir(path));

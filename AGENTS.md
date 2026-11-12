@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-`@khromov/simple-3d-modeling-mcp` is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer and a Claude Desktop `.mcpb` bundle.
+`@khromov/simple-3d-modeling-mcp` is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup, OpenSCAD's official nightly build); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer and a Claude Desktop `.mcpb` bundle.
 
 ## Commands
 
@@ -35,7 +35,7 @@ src/engine/
   types.ts              Engine interface, PreparedSource, RunJob/RunResult, EngineLog
   base-engine.ts        shared computeMesh (OFF/STL, 2D fallback) / exportFormat / validate on top of run()
   wasm-engine.ts        worker pool with per-job timeouts; mounts fonts/BOSL2/user files into MEMFS
-  wasm-worker.ts        runs one OpenSCAD WASM instance per job (see constraints below)
+  wasm-worker.ts        runs one OpenSCAD WASM instance per job; compiles openscad.wasm once per worker (see constraints below)
   native-engine.ts      OpenSCAD CLI: probing, arguments, temp-dir per job, PNG previews
   engine-factory.ts     auto | wasm | native selection
   source.ts             code/file input → PreparedSource; collects include/use/import dependencies
@@ -44,7 +44,7 @@ src/engine/
 src/geometry/           Mesh type, OFF/STL parsers, stats, STL/OBJ/OFF/3MF writers, minimal zip
 src/rendering/          camera conventions, software rasteriser, previews (single/multiview/turntable), PNG/APNG codec, bitmap font
 src/viewer/             local HTTP + WebSocket viewer (server, page HTML, version history)
-scripts/fetch-assets.mjs  builds assets/ (git-ignored, shipped in the npm package and .mcpb)
+scripts/fetch-assets.mjs  builds assets/ (OpenSCAD WASM, fonts, BOSL2, three.js; git-ignored, shipped in the npm package and .mcpb)
 scripts/build-mcpb.sh   bundle layout: server/{dist,assets,node_modules,package.json}
 scripts/capture-mcp-traffic.mjs  raw JSON-RPC capture of dist/ over stdio, volatile values masked; fails on unexpected outcomes (CI smoke test)
 mcpb/manifest.json      Claude Desktop extension manifest (tools list, user_config → env)
@@ -82,7 +82,7 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 
 ## Assets and dependencies
 
-- `assets/` is generated. BOSL2 is pinned by tag **and** SHA-256 in `scripts/fetch-assets.mjs`; when bumping it, update both. Fonts come from the `dejavu-fonts-ttf` devDependency, and the viewer's three.js files from the `three` devDependency. The script skips work when `assets/manifest.json` matches.
+- `assets/` is generated. OpenSCAD's official WebAssembly build (`assets/openscad/`: `openscad.mjs` glue + `openscad.wasm`) is the "web" zip from `files.openscad.org/snapshots`, pinned by snapshot date **and** SHA-256 in `scripts/fetch-assets.mjs`. Use the `-WebAssembly-web.zip`, not `-node.zip` (a CLI with host filesystem access that ignores `OPENSCADPATH`). Snapshots are pruned after some months, so bump the pin when it disappears; snapshots from 2026.09 on have no AMF export. BOSL2 is pinned by tag **and** SHA-256 too; when bumping either, update both values. Fonts come from the `dejavu-fonts-ttf` devDependency, and the viewer's three.js files from the `three` devDependency. The script skips work when `assets/manifest.json` matches.
 - Runtime dependencies end up in the `.mcpb` bundle; keep them minimal. The MCP layer is [tmcp](https://tmcp.io) (`tmcp`, `@tmcp/transport-stdio`). Capabilities are declared explicitly in `createServer`; registering a tool or resource does not add one. Tool schemas go through `ZodInputSchemaAdapter` in `server.ts` (`z.toJSONSchema` with `io: "input"`, so no `additionalProperties: false`, as the MCP SDK sent them).
 - **Known limitation**: `@tmcp/transport-stdio` handles a session's requests one at a time. A slow render delays `ping`, `tools/list` and any parallel tool calls until it finishes, and cancelling a request does not free the queue. Moving work into workers does not help (OpenSCAD already runs in a worker pool); the queue waits for each handler's result.
 - `build-mcpb.sh` installs with `--omit=dev --omit=optional`: valibot (a tmcp dependency) has an optional peer on `typescript`, which npm would otherwise ship because it is also our devDependency.
