@@ -58,8 +58,8 @@
 
 <style>
   ol { list-style: none; position: relative; }
-  /* The timeline's spine, through the centre of every node. */
-  ol::before { content: ""; position: absolute; left: 7px; top: 14px; bottom: 14px; width: 2px; background: var(--ink); }
+  /* The timeline's spine, through the centre of every node (8px row padding + half the 16px column). */
+  ol::before { content: ""; position: absolute; left: 15px; top: 14px; bottom: 14px; width: 2px; background: var(--ink); }
 
   .entry {
     position: relative;
@@ -68,7 +68,7 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 6px 8px 6px 0;
+    padding: 6px 10px 6px 8px;
     border: 0;
     background: none;
     text-align: left;
@@ -81,10 +81,12 @@
   .ago { font: 500 10px var(--font-mono); color: var(--ink-faint); white-space: nowrap; }
   .latest { color: var(--ink-soft); font-size: 9px; }
 
-  .active { background: var(--paper-sunk); box-shadow: inset 0 0 0 2px var(--ink); }
-  .active .node { background: var(--accent); width: 14px; height: 14px; }
+  /* The version in the viewport: inverted, like a toolbar toggle that is on. */
+  .active { background: var(--ink); color: var(--paper); }
+  .active .node { width: 14px; height: 14px; border-color: var(--paper); background: var(--bauhaus-red); }
   .active .name { font-weight: 650; }
-  .active .ver { color: var(--ink); }
+  .active .ver, .active .ago, .active .latest { color: var(--paper); }
+  .active .ago { opacity: 0.75; }
 
   .none { color: var(--ink-faint); }
 </style>

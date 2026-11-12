@@ -45,7 +45,7 @@ const THEMES = {
     ground: 0x3a5478,
     edges: { color: 0xf0f5fc, opacity: 0.7 },
     grid: { center: 0x7890b0, lines: 0x3a587f },
-    axes: [0xff8a78, 0x84e2a4, 0xa6d4ff],
+    axes: [0xff5a45, 0x2fd27a, 0x5ba3ff],
   },
 } as const;
 
@@ -77,12 +77,19 @@ export class ViewerScene {
   #home: { position: Vector3; target: Vector3 } | null = null;
   #lastRadius = 0;
 
-  constructor() {
+  /** `onAutoRotateStop` runs when a drag, touch or scroll turns auto-rotate off. */
+  constructor({ onAutoRotateStop }: { onAutoRotateStop?: () => void } = {}) {
     this.#renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.#renderer.setClearColor(0x000000, 0); // the page's paper shows through
     this.#controls = new OrbitControls(this.#camera, this.#renderer.domElement);
     this.#controls.enableDamping = true;
     this.#controls.autoRotateSpeed = 1.5;
+    // Taking hold of the model hands the camera back to the user.
+    this.#controls.addEventListener("start", () => {
+      if (!this.#controls.autoRotate) return;
+      this.#controls.autoRotate = false;
+      onAutoRotateStop?.();
+    });
     this.#hemi.position.set(0, 0, 1);
     this.#scene.add(this.#hemi, this.#key, this.#fill);
     this.#applyTheme();

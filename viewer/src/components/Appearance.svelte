@@ -29,7 +29,7 @@
         onclick={() => (color = p.hex)}
       >
         <!-- An SVG fill rather than a style attribute: the page's CSP forbids inline styles. -->
-        <svg viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" fill={p.hex} /></svg>
+        <svg viewBox="0 0 10 10" preserveAspectRatio="none" aria-hidden="true"><rect width="10" height="10" fill={p.hex} /></svg>
       </button>
     {/each}
     <label class={["swatch", "custom", { selected: isCustom }]} title="Pick any colour">
@@ -41,7 +41,7 @@
 </Section>
 
 <style>
-  .swatches { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; max-width: 320px; }
+  .swatches { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; max-width: 330px; padding: 2px 0; }
   .swatch {
     position: relative;
     aspect-ratio: 1;
@@ -54,12 +54,13 @@
   }
   .swatch svg { width: 100%; height: 100%; display: block; }
   .swatch:hover { transform: translate(-1px, -1px); box-shadow: 2px 2px 0 var(--shadow); }
-  .swatch[aria-checked="true"], .swatch.selected { box-shadow: var(--lift) var(--lift) 0 var(--shadow); transform: translate(-1px, -1px); outline: 2px solid var(--ink); outline-offset: 2px; }
+  /* A ring with a gap around the chosen swatch; it sits in the 10px gutter, clear of the neighbours. */
+  .swatch[aria-checked="true"], .swatch.selected { outline: 2px solid var(--ink); outline-offset: 3px; transform: none; box-shadow: none; }
   .custom { background: conic-gradient(var(--bauhaus-red), var(--bauhaus-yellow), var(--bauhaus-blue), var(--bauhaus-red)); color: #161616; }
   .custom :global(svg) { width: 15px; height: 15px; padding: 2px; box-sizing: content-box; background: #ffffffd0; }
   .custom:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
   input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; }
 
-  .help { margin-top: 8px; color: var(--ink-soft); font-size: 12px; }
+  .help { margin-top: 10px; color: var(--ink-soft); font-size: 12px; }
   code { font: 500 11px var(--font-mono); }
 </style>

@@ -7,7 +7,7 @@
 import type { Mesh } from "../../src/geometry/mesh.js";
 import { computeStats } from "../../src/geometry/stats.js";
 import { ViewerServer } from "../../src/viewer/viewer-server.js";
-import { box, lShape, merge } from "../../tests/helpers/meshes.js";
+import { box, merge } from "../../tests/helpers/meshes.js";
 
 type RGB = [number, number, number];
 
@@ -38,7 +38,9 @@ export async function startSampleServer(): Promise<{ url: string; stop(): Promis
 
   add(box([0, 0, 0], [60, 20, 1]), "Name tag outline", true);
   add(merge(box([0, 0, 0], [50, 50, 4]), cylinder(25, 25, 8, 30, 48, [70, 130, 180])), "Spool holder");
-  add(lShape(), "Bracket");
+  // Like the tests' lShape(), but the parts touch instead of overlapping: overlapping
+  // boxes leave coplanar red and blue faces that flicker (OpenSCAD's own output is a union).
+  add(merge(box([0, 0, 0], [25, 10, 5], [255, 0, 0]), box([25, 0, 0], [30, 10, 30], [0, 0, 255]), box([0, 10, 0], [5, 25, 5])), "Bracket");
 
   return { url: url.replace("localhost", "127.0.0.1"), stop: () => viewer.stop() };
 }

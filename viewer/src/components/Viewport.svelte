@@ -18,7 +18,7 @@
   let autoRotate = $state(false);
   let grid = $state(true);
 
-  const scene = new ViewerScene();
+  const scene = new ViewerScene({ onAutoRotateStop: () => (autoRotate = false) });
   $effect(() => () => scene.dispose());
 
   $effect(() => scene.setTheme(dark));
