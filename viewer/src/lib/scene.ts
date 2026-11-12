@@ -36,7 +36,7 @@ Object3D.DEFAULT_UP.set(0, 0, 1); // OpenSCAD is Z-up
 /**
  * Line colours per theme. The canvas is transparent and the page paints the
  * paper behind it, so these are matched to the tokens in app.css: ink on
- * paper (#f3efe6) for light, white on blueprint blue (#173b69) for dark.
+ * paper (#f3efe6) for light, white on blueprint blue (#143560) for dark.
  */
 const THEMES = {
   light: {
@@ -48,7 +48,7 @@ const THEMES = {
   dark: {
     ground: 0x3a5478,
     edges: { color: 0xf0f5fc, opacity: 0.7 },
-    grid: { center: 0x7890b0, lines: 0x3a587f },
+    grid: { center: 0x768caa, lines: 0x375377 },
     axes: [0xff5a45, 0x2fd27a, 0x5ba3ff],
   },
 } as const;

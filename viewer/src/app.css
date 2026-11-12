@@ -37,14 +37,14 @@
 /* Blueprint tokens: chosen explicitly, or by the OS when nothing is chosen. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #173b69;
-  --paper-raised: #1c4577;
-  --paper-sunk: #11315a;
+  --paper: #143560;
+  --paper-raised: #193f6e;
+  --paper-sunk: #0f2c52;
   --ink: #f0f5fc;
   --ink-soft: #bccbe0;
   --ink-faint: #89a2c6;
   --hairline: rgb(240 245 252 / 0.22);
-  --shadow: #0a1f3d;
+  --shadow: #081b36;
   --accent: #f6c445;
   --on-accent: #10284a;
   --axis-x: #ff5a45;
@@ -60,14 +60,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --paper: #173b69;
-    --paper-raised: #1c4577;
-    --paper-sunk: #11315a;
+    --paper: #143560;
+    --paper-raised: #193f6e;
+    --paper-sunk: #0f2c52;
     --ink: #f0f5fc;
     --ink-soft: #bccbe0;
     --ink-faint: #89a2c6;
     --hairline: rgb(240 245 252 / 0.22);
-    --shadow: #0a1f3d;
+    --shadow: #081b36;
     --accent: #f6c445;
     --on-accent: #10284a;
     --axis-x: #ff5a45;
