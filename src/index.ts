@@ -5,7 +5,7 @@
  * Uses bundled OpenSCAD WASM, or a native OpenSCAD when available.
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StdioTransport } from "@tmcp/transport-stdio";
 import { readConfig } from "./config.js";
 import { createEngine } from "./engine/index.js";
 import { createServer } from "./server.js";
@@ -36,6 +36,10 @@ async function main() {
     notes,
   });
 
+  // The stdio transport also exits the process itself on stdin end, SIGINT and
+  // SIGTERM. These handlers are registered first so the viewer and engine start
+  // shutting down before it exits; renders still in flight fail fast once the
+  // engine is disposed.
   let closing = false;
   const shutdown = async (code: number) => {
     if (closing) return;
@@ -46,8 +50,10 @@ async function main() {
   process.on("SIGINT", () => void shutdown(0));
   process.on("SIGTERM", () => void shutdown(0));
   process.stdin.on("close", () => void shutdown(0));
+  // The transport listens for stdin data and end only; without this an error would crash the process.
+  process.stdin.on("error", () => void shutdown(0));
 
-  await app.server.connect(new StdioServerTransport());
+  new StdioTransport(app.server).listen();
 }
 
 main().catch((err) => {

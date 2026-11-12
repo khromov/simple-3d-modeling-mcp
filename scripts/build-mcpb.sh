@@ -33,7 +33,10 @@ cp "$PROJECT_DIR/package.json" "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/LI
 
 echo "→ Installing production dependencies..."
 cd "$BUILD_DIR/server"
-npm ci --omit=dev --ignore-scripts
+# --omit=optional as well: valibot (via tmcp) has an optional peer dependency on
+# typescript, and because typescript is also our devDependency npm marks it
+# "devOptional", which --omit=dev alone keeps (~30 MB with the native binary).
+npm ci --omit=dev --omit=optional --ignore-scripts
 cd "$PROJECT_DIR"
 
 echo "→ Writing manifest..."
