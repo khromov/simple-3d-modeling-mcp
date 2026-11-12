@@ -29,10 +29,30 @@ import type { ViewerMesh } from "./mesh.js";
 
 Object3D.DEFAULT_UP.set(0, 0, 1); // OpenSCAD is Z-up
 
+/**
+ * Line colours per theme. The canvas is transparent and the page paints the
+ * paper behind it, so these are matched to the tokens in app.css: ink on
+ * paper (#f3efe6) for light, white on blueprint blue (#173b69) for dark.
+ */
+const THEMES = {
+  light: {
+    ground: 0x909090,
+    edges: { color: 0x161616, opacity: 0.6 },
+    grid: { center: 0xa6a39d, lines: 0xd8d5cd },
+    axes: [0xd63c26, 0x2e8b4f, 0x2456b0],
+  },
+  dark: {
+    ground: 0x3a5478,
+    edges: { color: 0xf0f5fc, opacity: 0.7 },
+    grid: { center: 0x7890b0, lines: 0x3a587f },
+    axes: [0xff8a78, 0x84e2a4, 0xa6d4ff],
+  },
+} as const;
+
 export class ViewerScene {
   readonly #scene = new Scene();
   readonly #camera = new PerspectiveCamera(40, 1, 0.1, 10000);
-  readonly #renderer = new WebGLRenderer({ antialias: true });
+  readonly #renderer = new WebGLRenderer({ antialias: true, alpha: true });
   readonly #controls: OrbitControls;
   readonly #hemi = new HemisphereLight(0xffffff, 0x404060, 1.2);
   readonly #key = new DirectionalLight(0xffffff, 1.6);
@@ -59,6 +79,7 @@ export class ViewerScene {
 
   constructor() {
     this.#renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.#renderer.setClearColor(0x000000, 0); // the page's paper shows through
     this.#controls = new OrbitControls(this.#camera, this.#renderer.domElement);
     this.#controls.enableDamping = true;
     this.#controls.autoRotateSpeed = 1.5;
@@ -159,6 +180,7 @@ export class ViewerScene {
     const radius = Math.max(size.length() / 2, 0.5);
     this.#rebuildGrid(Math.max(50, Math.ceil((Math.max(size.x, size.y) * 2) / 50) * 50));
     const axes = new AxesHelper(Math.max(size.x, size.y, size.z) * 0.6);
+    axes.setColors(...this.#theme.axes.map((c) => new Color(c)) as [Color, Color, Color]);
     axes.position.set(offset.x + box.min.x, offset.y + box.min.y, 0.01);
     axes.visible = this.#showGrid;
     this.#axes = axes;
@@ -191,11 +213,16 @@ export class ViewerScene {
     this.#renderer.forceContextLoss();
   }
 
+  get #theme() {
+    return this.#dark ? THEMES.dark : THEMES.light;
+  }
+
   #applyTheme(): void {
-    const dark = this.#dark;
-    this.#scene.background = new Color(dark ? 0x1a1a2e : 0xf0f0f0);
-    this.#hemi.groundColor.set(dark ? 0x404060 : 0x909090);
-    this.#edgeMaterial.color.set(dark ? 0x000000 : 0x222222);
+    const theme = this.#theme;
+    this.#hemi.groundColor.set(theme.ground);
+    this.#edgeMaterial.color.set(theme.edges.color);
+    this.#edgeMaterial.opacity = theme.edges.opacity;
+    this.#axes?.setColors(...theme.axes.map((c) => new Color(c)) as [Color, Color, Color]);
     this.#rebuildGrid(this.#gridSize);
   }
 
@@ -204,8 +231,8 @@ export class ViewerScene {
       this.#scene.remove(this.#grid);
       this.#grid.dispose();
     }
-    const dark = this.#dark;
-    const grid = new GridHelper(size, Math.min(100, Math.round(size / 10)), dark ? 0x44446a : 0xbbbbcc, dark ? 0x2a2a48 : 0xdcdce6);
+    const { center, lines } = this.#theme.grid;
+    const grid = new GridHelper(size, Math.min(100, Math.round(size / 10)), center, lines);
     grid.rotation.x = Math.PI / 2; // XY plane
     grid.visible = this.#showGrid;
     this.#grid = grid;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeStats } from "../../src/geometry/stats.js";
 import { encodeViewerMesh } from "../../src/viewer/viewer-server.js";
 import { ViewerState } from "../../src/viewer/viewer-state.js";
-import { formatMm, formatVolume, modelTitle, timeAgo } from "../../viewer/src/lib/format.js";
+import { formatLength, formatVolume, modelTitle, timeAgo } from "../../viewer/src/lib/format.js";
 import { decodeViewerMesh } from "../../viewer/src/lib/mesh.js";
 import { box, lShape } from "../helpers/meshes.js";
 
@@ -41,8 +41,8 @@ describe("viewer page: mesh decoding", () => {
 
 describe("viewer page: formatting", () => {
   it("formats dimensions, volume and titles like the sidebar shows them", () => {
-    expect(formatMm(30)).toBe("30 mm");
-    expect(formatMm(12.3456)).toBe("12.35 mm");
+    expect(formatLength(30)).toBe("30");
+    expect(formatLength(12.3456)).toBe("12.35");
     expect(formatVolume(3375, false)).toBe("3.38 cm³");
     expect(formatVolume(800, true)).toBe("8.00 cm²");
     expect(modelTitle({ title: "Plate", is2D: true })).toBe("Plate (2D, shown 1 mm thick)");

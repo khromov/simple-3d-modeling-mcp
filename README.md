@@ -117,9 +117,10 @@ On the first render an interactive viewer opens in your browser (set `OPENSCAD_A
 - **Live updates** — refreshes on every render; your camera position is kept while you iterate
 - **History** — every version, named after the render's `title`
 - **Dimensions** — size, true volume and triangle count
-- **Colours** — `color()` is shown; a colour picker sets the colour of uncoloured parts
+- **Colours** — `color()` is shown; preset swatches or a colour picker set the colour of uncoloured parts
 - **Export** — download STL or 3MF, or open the model in Bambu Studio, OrcaSlicer, PrusaSlicer, Cura or Creality Print
-- **Controls** — rotate (drag), zoom (scroll), pan (right-drag), edges, wireframe, auto-rotate, grid, light/dark theme
+- **Controls** — rotate (drag), zoom (scroll), pan (right-drag), edges, wireframe, auto-rotate, grid
+- **Themes** — a light "drawing on paper" theme and a dark blueprint theme; follows your OS setting until you pick one
 
 The viewer listens on `127.0.0.1` only and rejects requests from other web pages (Host and Origin checks).
 
@@ -195,4 +196,4 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 
 ## License
 
-GPL-2.0 (required by the bundled OpenSCAD). Bundled third-party assets keep their own licenses, included alongside them: OpenSCAD's WebAssembly build (GPL, see [openscad/openscad](https://github.com/openscad/openscad)), BOSL2 (BSD-2-Clause), DejaVu fonts (Bitstream Vera / public domain). The viewer page bundles three.js and Svelte (MIT); their license texts ship in `dist/viewer-ui/THIRD-PARTY-LICENSES.md`.
+GPL-2.0 (required by the bundled OpenSCAD). Bundled third-party assets keep their own licenses, included alongside them: OpenSCAD's WebAssembly build (GPL, see [openscad/openscad](https://github.com/openscad/openscad)), BOSL2 (BSD-2-Clause), DejaVu fonts (Bitstream Vera / public domain). The viewer page bundles three.js and Svelte (MIT), Lucide icons (ISC) and the Jost and IBM Plex Mono fonts (OFL-1.1); their license texts ship in `dist/viewer-ui/THIRD-PARTY-LICENSES.md`.
