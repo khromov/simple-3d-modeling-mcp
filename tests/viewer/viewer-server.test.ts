@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { computeStats } from "../../src/geometry/stats.js";
-import { buildSlicerCommand, ViewerServer } from "../../src/viewer/viewer-server.js";
+import { buildSlicerCommand, slicerFileFormat, ViewerServer } from "../../src/viewer/viewer-server.js";
 import { box, lShape } from "../helpers/meshes.js";
 
 function rawGet(url: string, path: string, headers: Record<string, string>): Promise<number> {
@@ -186,5 +186,11 @@ describe("buildSlicerCommand", () => {
     expect(buildSlicerCommand("orca", "C:\\m.stl", "win32")).toEqual({ cmd: "cmd", args: ["/c", "start", "", "orca-slicer", "C:\\m.stl"] });
     expect(buildSlicerCommand("cura", "/m.stl", "linux")).toEqual({ cmd: "cura", args: ["/m.stl"] });
     expect(() => buildSlicerCommand("evil; rm -rf /", "/m.stl", "linux")).toThrow(/Unknown slicer/);
+  });
+
+  it("hands chosen slicers a 3MF (colours included) and the system default app an STL", () => {
+    expect(slicerFileFormat("bambu")).toBe("3mf");
+    expect(slicerFileFormat("prusa")).toBe("3mf");
+    expect(slicerFileFormat("default")).toBe("stl");
   });
 });

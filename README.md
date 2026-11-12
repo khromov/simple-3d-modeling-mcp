@@ -118,7 +118,7 @@ On the first render an interactive viewer opens in your browser (set `OPENSCAD_A
 - **History** — every version, named after the render's `title`
 - **Dimensions** — size, true volume and triangle count
 - **Colours** — `color()` is shown; preset swatches or a colour picker set the colour of uncoloured parts
-- **Export** — download STL or 3MF, or open the model in Bambu Studio, OrcaSlicer, PrusaSlicer, Cura or Creality Print
+- **Export** — download STL or 3MF, or open the model in Bambu Studio, OrcaSlicer, PrusaSlicer, Cura or Creality Print (sent as a 3MF, so Bambu Studio 2.5+ maps its colours to filaments)
 - **Controls** — rotate (drag), zoom (scroll), pan (right-drag), edges, wireframe, auto-rotate, grid
 - **Themes** — a light "drawing on paper" theme and a dark blueprint theme; follows your OS setting until you pick one
 

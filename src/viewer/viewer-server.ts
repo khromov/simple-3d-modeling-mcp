@@ -42,6 +42,20 @@ export function buildSlicerCommand(slicer: string, filePath: string, os: string)
   return { cmd: entry.linux, args: [filePath] };
 }
 
+/**
+ * The file "Open in slicer" hands over. A chosen slicer gets a 3MF: every listed
+ * slicer opens it, its units are explicit, and Bambu Studio (2.5 and later) maps
+ * its colours to filaments. The system default app gets an STL, the format most
+ * likely to have an app registered for it.
+ */
+export function slicerFileFormat(slicer: string): "3mf" | "stl" {
+  return slicer === "default" ? "stl" : "3mf";
+}
+
+function modelFile(model: ModelVersion, fmt: "3mf" | "stl"): Uint8Array {
+  return fmt === "3mf" ? write3mf(model.mesh, { title: model.title }) : writeBinaryStl(model.mesh);
+}
+
 /** Binary mesh for the viewer: "S3DM", version, triangle count, flags, positions (f32×9n), colours (u8×4n, A=0 → default). */
 export function encodeViewerMesh(model: ModelVersion): Buffer {
   const { positions: p, indices: idx, colors } = model.mesh;
@@ -224,8 +238,8 @@ export class ViewerServer {
     if (req.method === "GET" && m) {
       const model = this.state.getVersion(Number(m[1]));
       if (!model) return this.notFound(res);
-      const fmt = m[2] ?? "stl";
-      const bytes = fmt === "3mf" ? write3mf(model.mesh, { title: model.title }) : writeBinaryStl(model.mesh);
+      const fmt = m[2] === "3mf" ? "3mf" : "stl";
+      const bytes = modelFile(model, fmt);
       res.writeHead(200, {
         "Content-Type": fmt === "3mf" ? "model/3mf" : "model/stl",
         "Content-Disposition": `attachment; filename="${safeFileName(model.title)}-v${model.version}.${fmt}"`,
@@ -246,7 +260,8 @@ export class ViewerServer {
       const slicer = url.searchParams.get("slicer") ?? "default";
       let command: { cmd: string; args: string[] };
       const dir = join(tmpdir(), "simple-3d-modeling-mcp", "slicer");
-      const filePath = join(dir, `${safeFileName(model.title)}-v${model.version}.stl`);
+      const fmt = slicerFileFormat(slicer);
+      const filePath = join(dir, `${safeFileName(model.title)}-v${model.version}.${fmt}`);
       try {
         command = buildSlicerCommand(slicer, filePath, platform());
       } catch {
@@ -255,7 +270,7 @@ export class ViewerServer {
         return;
       }
       await mkdir(dir, { recursive: true });
-      await writeFile(filePath, writeBinaryStl(model.mesh));
+      await writeFile(filePath, modelFile(model, fmt));
       execFile(command.cmd, command.args, (err) => {
         res.writeHead(err ? 500 : 200);
         res.end(err ? "Failed to open slicer" : "OK");

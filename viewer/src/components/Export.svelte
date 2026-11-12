@@ -72,6 +72,9 @@
       </select>
       <ChevronDown size={18} strokeWidth={2.25} />
     </label>
+    <p class="note">
+      {slicer === "default" ? "Sends an STL (no colours). Pick your slicer to send a 3MF." : "Sends a 3MF with colours."}
+    </p>
     <button class={["btn", "primary", "open", openState]} onclick={openInSlicer} disabled={openState === "opening"}>
       {#if openState === "opening"}
         <LoaderCircle class="spin" size={18} strokeWidth={2.25} />
@@ -88,7 +91,7 @@
 </Section>
 
 <style>
-  .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
   .file {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -103,8 +106,9 @@
   .fmt { font-size: 16px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.1; }
   .desc { color: var(--ink-soft); font-size: 11px; font-weight: 500; line-height: 1.2; }
 
-  .slicer { display: grid; gap: 10px; }
+  .slicer { display: grid; gap: 8px; }
   .select { position: relative; display: block; }
+  .note { margin-top: -3px; color: var(--ink-soft); font-size: 11px; }
   select {
     width: 100%;
     height: 40px;
