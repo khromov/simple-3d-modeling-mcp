@@ -16,6 +16,7 @@ npm run typecheck    # sources (tsconfig.json) and tests (tsconfig.test.json)
 npm test             # vitest; runs `npm run assets` first
 npx vitest run tests/rendering/software-renderer.test.ts   # a single file
 npm run build:mcpb   # Claude Desktop extension → simple-3d-modeling.mcpb
+node scripts/capture-mcp-traffic.mjs out.json   # record the built server's stdio JSON-RPC traffic (diff two runs)
 ```
 
 Node 22, 24 or 26 (see `engines`; `.nvmrc` pins 22). Run `npm run typecheck` and `npm test` before finishing any change. The full suite takes about 6 seconds, but `tests/package-manifest.test.ts` downloads npm 12.2.2 via `npx`, so it needs network.
@@ -23,8 +24,8 @@ Node 22, 24 or 26 (see `engines`; `.nvmrc` pins 22). Run `npm run typecheck` and
 ## Layout
 
 ```
-src/index.ts            stdio entry point: reads env config, picks the engine, starts the server
-src/server.ts           every MCP tool and resource (registerTool + titles + annotations)
+src/index.ts            stdio entry point: reads env config, picks the engine, starts the server (tmcp StdioTransport)
+src/server.ts           every MCP tool and resource (tmcp `server.tool` / `server.resource` + titles + annotations)
 src/config.ts           OPENSCAD_* environment variables
 src/model-service.ts    evaluates models and caches meshes per (engine, source hash, params)
 src/paths.ts            package root / assets / version lookup (works from src/, dist/ and the .mcpb)
@@ -44,6 +45,7 @@ src/rendering/          camera conventions, software rasteriser, previews (singl
 src/viewer/             local HTTP + WebSocket viewer (server, page HTML, version history)
 scripts/fetch-assets.mjs  builds assets/ (git-ignored, shipped in the npm package and .mcpb)
 scripts/build-mcpb.sh   bundle layout: server/{dist,assets,node_modules,package.json}
+scripts/capture-mcp-traffic.mjs  raw JSON-RPC capture of dist/ over stdio, volatile values masked (no MCP client library)
 mcpb/manifest.json      Claude Desktop extension manifest (tools list, user_config → env)
 ```
 
@@ -57,7 +59,7 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - **Camera math follows OpenSCAD.** The model-to-eye transform is `Rx(-rx)·Ry(-ry)·Rz(-rz)`, with Z up and the camera looking down -Z. The golden tests in `tests/rendering/` lock this down; if they fail, the renderer is wrong, not the test.
 - **Colours**: OpenSCAD paints uncoloured faces `#F9D72C` and difference() cut faces `#9DCB51`. `isDefaultColor()` treats both as "no colour"; previews, stats, 3MF and the viewer depend on it.
 - **Errors reach the model verbatim.** Classify OpenSCAD output in `engine/output.ts`. Throw `UserError` for bad tool input. Handlers are wrapped in `handle()` so failures become `isError` results, never protocol errors. Add hints in `hintsFor()` (`server.ts`) rather than rewording OpenSCAD's messages.
-- **Keep tool results small.** No multi-MB base64 payloads: the MCP SDK's stdio client drops messages over 10 MB, and big payloads waste context. `export` writes files and returns a `resource_link`; inline embedding is opt-in (`embed`, ≤ 5 MB).
+- **Keep tool results small.** No multi-MB base64 payloads: clients built on the official MCP SDK drop stdio messages over 10 MB, and big payloads waste context. `export` writes files and returns a `resource_link`; inline embedding is opt-in (`embed`, ≤ 5 MB).
 - **File safety**: `export` never overwrites unless `overwrite: true`, and the path extension must match the format. `read_scad_file` and `save_scad_file` only accept `.scad`. Relative paths resolve against the export folder, never the process cwd.
 - **Viewer security**: it binds to `127.0.0.1`, checks the Host header on every request and the Origin on WebSocket and POST, and serves three.js from `assets/vendor/three` (no CDN). Keep all three when changing the viewer.
 - **Native engine**: auto mode only selects an installed OpenSCAD that supports `--backend` (Manifold). Each run gets its own temp directory, which is deleted afterwards. `--render` is never passed for PNGs (OpenCSG preview is faster and keeps colours).
@@ -65,10 +67,10 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 
 ## Adding or changing a tool
 
-1. Register it in `src/server.ts` with `title`, `description`, a zod `inputSchema` with bounds, and `annotations` (`readOnlyHint`, `destructiveHint`, …).
+1. Register it in `src/server.ts` with `server.tool({ name, title, description, schema: z.object({ … }), annotations }, handle(async (args) => …))`: zod fields with bounds, and `annotations` (`readOnlyHint`, `destructiveHint`, …). Tools without inputs omit `schema`. tmcp validates arguments before the handler runs and turns failures into `isError` results.
 2. Model tools take `code` or `file` (`sourceShape`) plus `params` (`paramsSchema`), and go through `ModelService` so the cache is shared.
 3. Update the `tools` list in `mcpb/manifest.json`, the Tools table in `README.md`, and the expected tool list in `tests/server.test.ts`.
-4. Add MCP-level tests in `tests/server.test.ts`; they use `InMemoryTransport` and the real WASM engine.
+4. Add MCP-level tests in `tests/server.test.ts`; they use a `@tmcp/transport-in-memory` session and the real WASM engine.
 
 ## Tests
 
@@ -80,7 +82,8 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 ## Assets and dependencies
 
 - `assets/` is generated. BOSL2 is pinned by tag **and** SHA-256 in `scripts/fetch-assets.mjs`; when bumping it, update both. Fonts come from the `dejavu-fonts-ttf` devDependency, and the viewer's three.js files from the `three` devDependency. The script skips work when `assets/manifest.json` matches.
-- Runtime dependencies end up in the `.mcpb` bundle; keep them minimal.
+- Runtime dependencies end up in the `.mcpb` bundle; keep them minimal. The MCP layer is [tmcp](https://tmcp.io) (`tmcp`, `@tmcp/adapter-zod`, `@tmcp/transport-stdio`). Capabilities are declared explicitly in `createServer`; registering a tool or resource does not add one.
+- `build-mcpb.sh` installs with `--omit=dev --omit=optional`: valibot (a tmcp dependency) has an optional peer on `typescript`, which npm would otherwise ship because it is also our devDependency.
 
 ## Releases
 
