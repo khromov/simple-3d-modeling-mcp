@@ -177,14 +177,17 @@ The viewer listens on `127.0.0.1` only and rejects requests from other web pages
 
 ```bash
 npm install
-npm run build        # fetches bundled assets (fonts, BOSL2, viewer files) and compiles TypeScript
+npm run build        # fetches bundled assets (OpenSCAD WASM, fonts, BOSL2), builds the viewer page and compiles TypeScript
 npm test             # unit, engine, renderer, viewer and MCP-level tests
-npm run typecheck    # sources and tests
+npm run typecheck    # sources, tests and the viewer (svelte-check)
 npm run dev          # watch mode
+npm run dev:viewer   # viewer UI with hot reload, against sample models
 npm run build:mcpb   # Claude Desktop extension bundle
 ```
 
-`npm run assets` populates `assets/` (git-ignored): DejaVu fonts from the `dejavu-fonts-ttf` package, the three.js files the viewer needs, and BOSL2 downloaded from GitHub at a pinned tag and verified against a SHA-256 checksum.
+`npm run assets` populates `assets/` (git-ignored): OpenSCAD's WebAssembly build and BOSL2, both downloaded at pinned versions and verified against SHA-256 checksums, and DejaVu fonts from the `dejavu-fonts-ttf` package.
+
+The browser viewer is a Vite + Svelte 5 app in `viewer/` (an npm workspace). `npm run build` bundles it, three.js included, into `dist/viewer-ui`, which the server serves locally.
 
 ### Releasing
 

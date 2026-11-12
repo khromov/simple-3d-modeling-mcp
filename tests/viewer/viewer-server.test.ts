@@ -1,4 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { computeStats } from "../../src/geometry/stats.js";
@@ -36,21 +39,48 @@ describe("ViewerServer", () => {
     expect(b).toBe(a);
     const res = await fetch(a);
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self';");
+    expect(csp).not.toContain("unsafe-inline");
     const html = await res.text();
-    expect(html).toContain("/vendor/three/three.module.js");
-    expect(html).not.toContain("cdn.jsdelivr");
+    expect(html).toMatch(/<script type="module"[^>]* src="\/assets\/[^"]+\.js"/);
+    expect(html).not.toMatch(/https?:\/\//); // everything is served locally
   });
 
-  it("serves three.js locally", async () => {
+  it("serves the page's bundled scripts and styles (three.js included)", async () => {
     server = new ViewerServer();
     const url = await server.start();
-    for (const path of ["/vendor/three/three.module.js", "/vendor/three/three.core.js", "/vendor/three/addons/controls/OrbitControls.js"]) {
+    const html = await (await fetch(url)).text();
+    const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+    expect(assets.some((a) => a.endsWith(".js"))).toBe(true);
+    expect(assets.some((a) => a.endsWith(".css"))).toBe(true);
+    for (const path of assets) {
       const res = await fetch(url + path);
       expect(res.status, path).toBe(200);
-      expect(res.headers.get("content-type")).toContain("javascript");
+      expect(res.headers.get("content-type"), path).toMatch(path.endsWith(".js") ? /javascript/ : /text\/css/);
+      expect(res.headers.get("cache-control"), path).toContain("immutable");
+      expect(res.headers.get("x-content-type-options"), path).toBe("nosniff");
+      if (path.endsWith(".js")) expect(await res.text()).toContain("Three.js Authors"); // MIT notice kept
     }
-    expect((await fetch(url + "/vendor/three/../../package.json")).status).toBe(404);
+    for (const path of ["/assets/../../package.json", "/assets/%2e%2e/%2e%2e/package.json", "/assets/", "/vendor/three/three.module.js"]) {
+      expect(await rawGet(url, path, { Host: new URL(url).host }), path).toBe(404);
+    }
+  });
+
+  it("explains a missing page build instead of failing silently", async () => {
+    const empty = mkdtempSync(join(tmpdir(), "viewer-ui-"));
+    try {
+      server = new ViewerServer({ uiDir: join(empty, "missing") });
+      const url = await server.start();
+      const res = await fetch(url);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain("npm run build");
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   it("rejects requests with a foreign Host header (DNS rebinding)", async () => {

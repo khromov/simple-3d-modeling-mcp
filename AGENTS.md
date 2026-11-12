@@ -4,16 +4,18 @@ Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-`@khromov/simple-3d-modeling-mcp` is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup, OpenSCAD's official nightly build); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer and a Claude Desktop `.mcpb` bundle.
+`@khromov/simple-3d-modeling-mcp` is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup, OpenSCAD's official nightly build); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer (a Vite + Svelte 5 app in `viewer/`) and a Claude Desktop `.mcpb` bundle.
 
 ## Commands
 
 ```bash
 npm install
-npm run assets       # populate assets/ (fonts, BOSL2, viewer three.js) — needs network the first time
-npm run build        # clean dist/, fetch assets, compile with tsc
-npm run typecheck    # sources (tsconfig.json) and tests (tsconfig.test.json)
-npm test             # vitest; runs `npm run assets` first
+npm run assets       # populate assets/ (OpenSCAD WASM, fonts, BOSL2) — needs network the first time
+npm run build        # clean dist/, fetch assets, build the viewer page (Vite → dist/viewer-ui), compile with tsc
+npm run build:viewer # only the viewer page
+npm run dev:viewer   # viewer UI with hot reload, against a real ViewerServer seeded with sample models
+npm run typecheck    # sources (tsconfig.json), tests (tsconfig.test.json), viewer (svelte-check)
+npm test             # vitest; runs `npm run assets` and `npm run build:viewer` first
 npx vitest run tests/rendering/software-renderer.test.ts   # a single file
 bun --bun vitest run # the same suite on the Bun runtime (CI runs latest Bun)
 npm run build:mcpb   # Claude Desktop extension → simple-3d-modeling.mcpb
@@ -43,8 +45,15 @@ src/engine/
   params.ts             `-D name=value` formatting and validation
 src/geometry/           Mesh type, OFF/STL parsers, stats, STL/OBJ/OFF/3MF writers, minimal zip
 src/rendering/          camera conventions, software rasteriser, previews (single/multiview/turntable), PNG/APNG codec, bitmap font
-src/viewer/             local HTTP + WebSocket viewer (server, page HTML, version history)
-scripts/fetch-assets.mjs  builds assets/ (OpenSCAD WASM, fonts, BOSL2, three.js; git-ignored, shipped in the npm package and .mcpb)
+src/viewer/             local HTTP + WebSocket viewer server (serves dist/viewer-ui, mesh/STL/3MF, slicer launch, version history)
+viewer/                 the viewer page: Vite + Svelte 5 npm workspace, built into dist/viewer-ui (three.js bundled)
+  src/App.svelte        state and layout: WebSocket connection, current model, theme, model colour
+  src/components/       Viewport (canvas + overlays), Controls, sidebar sections (Dimensions, History, Appearance, Export)
+  src/lib/scene.ts      three.js scene: model, edges, grid, axes, lights, orbit camera
+  src/lib/mesh.ts       decodes the server's binary mesh (encodeViewerMesh in src/viewer/viewer-server.ts)
+  src/lib/protocol.ts   WebSocket message types the server sends
+  dev/sample-server.ts  `npm run dev:viewer` backend (loaded by vite.config.ts through Vite's module runner)
+scripts/fetch-assets.mjs  builds assets/ (OpenSCAD WASM, fonts, BOSL2; git-ignored, shipped in the npm package and .mcpb)
 scripts/build-mcpb.sh   bundle layout: server/{dist,assets,node_modules,package.json}
 scripts/capture-mcp-traffic.mjs  raw JSON-RPC capture of dist/ over stdio, volatile values masked; fails on unexpected outcomes (CI smoke test)
 mcpb/manifest.json      Claude Desktop extension manifest (tools list, user_config → env)
@@ -62,7 +71,8 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - **Errors reach the model verbatim.** Classify OpenSCAD output in `engine/output.ts`. Throw `UserError` for bad tool input. Handlers are wrapped in `handle()` so failures (and oversized payloads) become `isError` results, never protocol errors. Add hints in `hintsFor()` (`server.ts`) rather than rewording OpenSCAD's messages.
 - **Keep tool results small.** No multi-MB base64 payloads: clients built on the official MCP SDK drop stdio messages over 10 MB, and big payloads waste context. `export` writes files and returns a `resource_link`; inline embedding is opt-in (`embed`). Inline images and embedded files are capped at `MAX_INLINE_BYTES` (2 MiB): tmcp validates every result's base64 with a regex that overflows V8's stack at about 3.2 MiB, which would turn the result into a JSON-RPC error.
 - **File safety**: `export` never overwrites unless `overwrite: true`, and the path extension must match the format. `read_scad_file` and `save_scad_file` only accept `.scad`. Relative paths resolve against the export folder, never the process cwd.
-- **Viewer security**: it binds to `127.0.0.1`, checks the Host header on every request and the Origin on WebSocket and POST, and serves three.js from `assets/vendor/three` (no CDN). Keep all three when changing the viewer.
+- **Viewer security**: it binds to `127.0.0.1`, checks the Host header on every request and the Origin on WebSocket and POST, and serves only the files of the built page, with three.js bundled in (no CDN). The page's CSP allows scripts and styles from `'self'` only, so the UI must not use inline `<script>`, `<style>` or `style="…"` attributes. Keep all of this when changing the viewer.
+- **Viewer page** (`viewer/`): an npm workspace with its own devDependencies, including TypeScript 6, because svelte-check does not support the root's TypeScript 7 yet. The three.js code lives in `src/lib/scene.ts`; components drive it through `$effect`. If you change what the server sends (`encodeViewerMesh`, `updateMessage`), update `src/lib/mesh.ts` / `src/lib/protocol.ts`; `tests/viewer/viewer-ui.test.ts` round-trips the mesh format. The page connects its WebSocket to `/ws` (the server accepts any path), so the dev proxy can tell it apart from Vite's own.
 - **Native engine**: auto mode only selects an installed OpenSCAD that supports `--backend` (Manifold). Each run gets its own temp directory, which is deleted afterwards. `--render` is never passed for PNGs (OpenCSG preview is faster and keeps colours).
 - The package-root lookup in `paths.ts` matches the package name with a regex; update it if the package is renamed.
 
@@ -79,10 +89,11 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - `tests/engine/native-engine.test.ts` drives a fake `openscad` Node script, so it needs no OpenSCAD install. It is skipped on Windows.
 - WASM engine and server tests use the real bundled engine. Dispose engines and servers in `afterAll`.
 - Never write to real user folders in tests. Pass a temp `outputDir` to `createServer` and an `openUrl` stub so no browser opens.
+- The viewer server tests serve the built page from `dist/viewer-ui` (`pretest` builds it; build it yourself before running a single viewer test file with `npx vitest`). `tests/package-manifest.test.ts` rebuilds `dist/`, so `vitest.config.ts` puts it in its own project that runs after all the others.
 
 ## Assets and dependencies
 
-- `assets/` is generated. OpenSCAD's official WebAssembly build (`assets/openscad/`: `openscad.mjs` glue + `openscad.wasm`) is the "web" zip from `files.openscad.org/snapshots`, pinned by snapshot date **and** SHA-256 in `scripts/fetch-assets.mjs`. Use the `-WebAssembly-web.zip`, not `-node.zip` (a CLI with host filesystem access that ignores `OPENSCADPATH`). Snapshots are pruned after some months, so bump the pin when it disappears; snapshots from 2026.09 on have no AMF export. BOSL2 is pinned by tag **and** SHA-256 too; when bumping either, update both values. Fonts come from the `dejavu-fonts-ttf` devDependency, and the viewer's three.js files from the `three` devDependency. The script skips work when `assets/manifest.json` matches.
+- `assets/` is generated. OpenSCAD's official WebAssembly build (`assets/openscad/`: `openscad.mjs` glue + `openscad.wasm`) is the "web" zip from `files.openscad.org/snapshots`, pinned by snapshot date **and** SHA-256 in `scripts/fetch-assets.mjs`. Use the `-WebAssembly-web.zip`, not `-node.zip` (a CLI with host filesystem access that ignores `OPENSCADPATH`). Snapshots are pruned after some months, so bump the pin when it disappears; snapshots from 2026.09 on have no AMF export. BOSL2 is pinned by tag **and** SHA-256 too; when bumping either, update both values. Fonts come from the `dejavu-fonts-ttf` devDependency. three.js is a devDependency of the `viewer/` workspace and is bundled into `dist/viewer-ui`, not copied into `assets/`. The script skips work when `assets/manifest.json` matches.
 - Runtime dependencies end up in the `.mcpb` bundle; keep them minimal. The MCP layer is [tmcp](https://tmcp.io) (`tmcp`, `@tmcp/transport-stdio`). Capabilities are declared explicitly in `createServer`; registering a tool or resource does not add one. Tool schemas go through `ZodInputSchemaAdapter` in `server.ts` (`z.toJSONSchema` with `io: "input"`, so no `additionalProperties: false`, as the MCP SDK sent them).
 - **Known limitation**: `@tmcp/transport-stdio` handles a session's requests one at a time. A slow render delays `ping`, `tools/list` and any parallel tool calls until it finishes, and cancelling a request does not free the queue. Moving work into workers does not help (OpenSCAD already runs in a worker pool); the queue waits for each handler's result.
 - `build-mcpb.sh` installs with `--omit=dev --omit=optional`: valibot (a tmcp dependency) has an optional peer on `typescript`, which npm would otherwise ship because it is also our devDependency.
