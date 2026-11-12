@@ -46,7 +46,7 @@ src/rendering/          camera conventions, software rasteriser, previews (singl
 src/viewer/             local HTTP + WebSocket viewer (server, page HTML, version history)
 scripts/fetch-assets.mjs  builds assets/ (git-ignored, shipped in the npm package and .mcpb)
 scripts/build-mcpb.sh   bundle layout: server/{dist,assets,node_modules,package.json}
-scripts/capture-mcp-traffic.mjs  raw JSON-RPC capture of dist/ over stdio, volatile values masked (no MCP client library)
+scripts/capture-mcp-traffic.mjs  raw JSON-RPC capture of dist/ over stdio, volatile values masked; fails on unexpected outcomes (CI smoke test)
 mcpb/manifest.json      Claude Desktop extension manifest (tools list, user_config → env)
 ```
 
@@ -93,4 +93,4 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - **Do not edit versions by hand.** release-please manages `package.json`, `package-lock.json`, `mcpb/manifest.json` (via `extra-files`), `.release-please-manifest.json` and `CHANGELOG.md`.
 - Merging the release PR tags `vX.Y.Z`. `.github/workflows/release.yml` then type-checks, tests, publishes to npm with trusted publishing (OIDC, provenance, no token), and uploads the `.mcpb` to the GitHub release. `package.json` `repository.url` must stay `git+https://github.com/khromov/simple-3d-modeling-mcp.git`, or OIDC publishing fails.
 - Keep these in sync: the npm version in `release.yml` and `tests/package-manifest.test.ts` (currently 12.2.2), and the Node range in `package.json` `engines` and `mcpb/manifest.json` `compatibility.runtimes.node`.
-- CI (`.github/workflows/ci.yml`) runs Linux/macOS/Windows × Node 22/24/26 and × latest Bun (tests via `bun --bun vitest run`), each followed by a stdio smoke test with `scripts/capture-mcp-traffic.mjs`, plus an `.mcpb` build. Workflows on PRs opened by release-please need a manual "Approve and run".
+- CI (`.github/workflows/ci.yml`) runs Linux/macOS/Windows × Node 22/24/26 and × latest Bun (tests via `bun --bun vitest run`), each followed by a stdio smoke test with `scripts/capture-mcp-traffic.mjs`, plus an `.mcpb` build whose unzipped server gets the same smoke test. The Bun job skips `tests/package-manifest.test.ts`, which would run npm itself under Bun. Workflows on PRs opened by release-please need a manual "Approve and run".

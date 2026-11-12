@@ -10,8 +10,12 @@
  * viewer port, evaluation time, and binary payloads (replaced by size + hash).
  * open_viewer is skipped because it opens a real browser.
  *
- * Exits with 1 if any request goes unanswered or a server process exits with a
- * non-zero code, so it doubles as a stdio smoke test (CI runs it under Bun).
+ * Each call also has an expected outcome (result, isError result, JSON-RPC
+ * error, or no reply). The script exits with 1 when an outcome differs, a
+ * request goes unanswered, the server prints non-JSON to stdout, or a server
+ * process exits non-zero, so CI also runs it as a stdio
+ * smoke test (on Node, on Bun, and against the bundled .mcpb). It stops at the
+ * first unanswered request instead of waiting out every timeout.
  */
 
 import { spawn } from "node:child_process";
@@ -43,6 +47,7 @@ function startSession(outDir) {
     env: { ...process.env, OPENSCAD_ENGINE: "wasm", OPENSCAD_AUTO_OPEN_VIEWER: "false", OPENSCAD_OUTPUT_DIR: outDir },
     stdio: ["pipe", "pipe", "pipe"],
   });
+  child.stdin.on("error", () => {}); // EPIPE after a crash shows up as a missing response instead
   const inbox = [];
   const waiters = [];
   const stderr = [];
@@ -80,12 +85,21 @@ function startSession(outDir) {
       check();
     });
 
+  const answered = (box, id) => box.some((m) => m.id === id && !("method" in m));
+  /** Waits for the response to `id`; throws if the server exits or the timeout hits first. */
+  const awaitResponse = async (id, what) => {
+    const received = await until((box) => answered(box, id), REQUEST_TIMEOUT_MS);
+    if (!answered(received, id)) {
+      throw new Error(`no response to ${what} (${hasExited ? "server exited" : `timed out after ${REQUEST_TIMEOUT_MS / 1000}s`})`);
+    }
+    return received;
+  };
+
   return {
     async request(id, method, params) {
       const msg = { jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) };
       child.stdin.write(JSON.stringify(msg) + "\n");
-      const received = await until((box) => box.some((m) => m.id === id && !("method" in m)), REQUEST_TIMEOUT_MS);
-      return { send: msg, receive: received };
+      return { send: msg, receive: await awaitResponse(id, method) };
     },
     async notify(method, params) {
       const msg = { jsonrpc: "2.0", method, ...(params !== undefined ? { params } : {}) };
@@ -149,21 +163,27 @@ const init = (protocolVersion) => ["initialize", { protocolVersion, capabilities
 
 async function mainSession(s, rec) {
   let id = 0;
-  const req = async (label, method, params) => rec(label, await s.request(++id, method, params));
-  const call = (label, name, args) => req(`tools/call ${name}: ${label}`, "tools/call", { name, ...(args !== undefined ? { arguments: args } : {}) });
+  const req = async (label, method, params, expect = "result", check) => rec(label, await s.request(++id, method, params), expect, check);
+  const call = (label, name, args, expect = "result") =>
+    req(`tools/call ${name}: ${label}`, "tools/call", { name, ...(args !== undefined ? { arguments: args } : {}) }, expect);
 
-  await req("initialize", ...init("2025-06-18"));
-  rec("notifications/initialized", await s.notify("notifications/initialized"));
+  await req("initialize", ...init("2025-06-18"), "result", (r) =>
+    r.result.serverInfo?.name === "simple-3d-modeling-mcp" ? undefined : `unexpected serverInfo ${JSON.stringify(r.result.serverInfo)}`,
+  );
+  rec("notifications/initialized", await s.notify("notifications/initialized"), "none");
   await req("ping", "ping");
-  await req("tools/list", "tools/list");
+  await req("tools/list", "tools/list", undefined, "result", (r) =>
+    ["render", "export", "validate"].every((n) => r.result.tools?.some((t) => t.name === n)) ? undefined : "tools/list is missing core tools",
+  );
   await req("resources/list", "resources/list");
   await req("resources/templates/list", "resources/templates/list");
   await req("resources/read cheatsheet", "resources/read", { uri: "openscad://cheatsheet" });
-  await req("resources/read unknown", "resources/read", { uri: "openscad://nope" });
-  await req("prompts/list (no prompts)", "prompts/list");
-  await req("logging/setLevel (no logging capability)", "logging/setLevel", { level: "info" });
-  await req("completion/complete (unsupported)", "completion/complete", { ref: { type: "ref/resource", uri: "openscad://cheatsheet" }, argument: { name: "x", value: "" } });
-  await req("unknown method", "does/not/exist");
+  await req("resources/read unknown", "resources/read", { uri: "openscad://nope" }, "error");
+  await req("prompts/list (no prompts)", "prompts/list", undefined, "error");
+  await req("logging/setLevel (no logging capability)", "logging/setLevel", { level: "info" }, "error");
+  // The SDK answered with "method not found"; tmcp with a null result. Clients only call it when `completions` is advertised.
+  await req("completion/complete (unsupported)", "completion/complete", { ref: { type: "ref/resource", uri: "openscad://cheatsheet" }, argument: { name: "x", value: "" } }, "any");
+  await req("unknown method", "does/not/exist", undefined, "error");
 
   // Simple informational tools
   await call("ok", "get_version");
@@ -172,24 +192,24 @@ async function mainSession(s, rec) {
 
   // validate
   await call("ok with echo", "validate", { code: 'echo("ok"); cube(1);' });
-  await call("assert failure", "validate", { code: 'assert(false, "too thin");' });
+  await call("assert failure", "validate", { code: 'assert(false, "too thin");' }, "isError");
 
   // render
   await call("ok", "render", { code: '// Test block\necho("w", 40);\ncube([40, 20, 10]);', width: 320, height: 240 });
   await call("cached", "render", { code: '// Test block\necho("w", 40);\ncube([40, 20, 10]);', width: 320, height: 240, view: "top" });
   await call("orthographic + params", "render", { code: "cube([w, 5, 5]);", params: { w: 12 }, projection: "orthographic", width: 128, height: 128, title: "param cube" });
-  await call("syntax error", "render", { code: "cube([10, 10, 10);" });
-  await call("empty geometry", "render", { code: "difference() { cube(5); cube(10); }" });
-  await call("invalid view", "render", { code: "cube(1);", view: "sideways" });
-  await call("no source", "render", {});
-  await call("width out of range (schema)", "render", { code: "cube(1);", width: 100000 });
-  await call("wrong type (schema)", "render", { code: 42 });
-  await call("no arguments object", "render");
+  await call("syntax error", "render", { code: "cube([10, 10, 10);" }, "isError");
+  await call("empty geometry", "render", { code: "difference() { cube(5); cube(10); }" }, "isError");
+  await call("invalid view", "render", { code: "cube(1);", view: "sideways" }, "isError");
+  await call("no source", "render", {}, "isError");
+  await call("width out of range (schema)", "render", { code: "cube(1);", width: 100000 }, "isError");
+  await call("wrong type (schema)", "render", { code: 42 }, "isError");
+  await call("no arguments object", "render", undefined, "isError");
 
   // render_multiview / render_turntable
   await call("default views", "render_multiview", { code: "cube([10, 20, 30]);", width: 128, height: 128 });
   await call("custom views", "render_multiview", { code: "cube(1);", views: ["iso", "bottom"], width: 128, height: 128 });
-  await call("bad view enum (schema)", "render_multiview", { code: "cube(1);", views: ["sideways"] });
+  await call("bad view enum (schema)", "render_multiview", { code: "cube(1);", views: ["sideways"] }, "isError");
   await call("4 frames", "render_turntable", { code: "cube(5);", frames: 4, width: 128, height: 128 });
 
   // export
@@ -197,24 +217,24 @@ async function mainSession(s, rec) {
   await call("3mf again (numbered name)", "export", { code: 'color("red") cube(10);', format: "3mf", title: "Red cube" });
   await call("stl inferred from path, embedded", "export", { code: "cube(2);", path: "nested/part.stl", embed: true });
   await call("obj", "export", { code: "cube(2);", format: "obj", title: "obj part" });
-  await call("format/path mismatch", "export", { code: "cube(1);", path: "x.3mf", format: "stl" });
+  await call("format/path mismatch", "export", { code: "cube(1);", path: "x.3mf", format: "stl" }, "isError");
   await call("svg 2D", "export", { code: "square([20, 10]);", format: "svg", title: "plate" });
-  await call("2D as stl", "export", { code: "square([20, 10]);", format: "stl" });
-  await call("unsupported format (schema)", "export", { code: "cube(1);", format: "step" });
+  await call("2D as stl", "export", { code: "square([20, 10]);", format: "stl" }, "isError");
+  await call("unsupported format (schema)", "export", { code: "cube(1);", format: "step" }, "isError");
 
   // .scad files
   await call("lib", "save_scad_file", { path: "proj/parts/lib.scad", code: "module part(s) { cube(s); }\n" });
   await call("main", "save_scad_file", { path: "proj/main.scad", code: "use <parts/lib.scad>\npart(6);\n" });
-  await call("exists", "save_scad_file", { path: "proj/main.scad", code: "cube(1);" });
-  await call("wrong extension", "save_scad_file", { path: "x.sh", code: "rm -rf /" });
-  await call("missing code (schema)", "save_scad_file", { path: "y.scad" });
+  await call("exists", "save_scad_file", { path: "proj/main.scad", code: "cube(1);" }, "isError");
+  await call("wrong extension", "save_scad_file", { path: "x.sh", code: "rm -rf /" }, "isError");
+  await call("missing code (schema)", "save_scad_file", { path: "y.scad" }, "isError");
   await call("ok", "read_scad_file", { path: "<OUT>/proj/main.scad" });
-  await call("missing file", "read_scad_file", { path: "<OUT>/proj/nope.scad" });
+  await call("missing file", "read_scad_file", { path: "<OUT>/proj/nope.scad" }, "isError");
   await call("render from file with relative use", "render", { file: "<OUT>/proj/main.scad", width: 64, height: 64 });
 
   // errors
-  await call("unknown tool", "no_such_tool", {});
-  await req("tools/call without params", "tools/call");
+  await call("unknown tool", "no_such_tool", {}, "isError");
+  await req("tools/call without params", "tools/call", undefined, "error");
 }
 
 async function main() {
@@ -223,6 +243,17 @@ async function main() {
   const transcript = { entry, sessions: [] };
   const problems = [];
 
+  /** Returns why an exchange doesn't match `expect` ("result" | "isError" | "error" | "none" | "any"), or undefined. */
+  const mismatch = (ex, expect) => {
+    if (expect === "any") return undefined;
+    if (expect === "none") return ex.receive.length ? `expected no reply, got ${ex.receive.length} message(s)` : undefined;
+    const r = ex.receive.find((m) => m.id === ex.send.id && !("method" in m));
+    const got = r?.error ? "JSON-RPC error" : r?.result?.isError ? "isError result" : r ? "result" : "no response";
+    const want = { result: "result", isError: "isError result", error: "JSON-RPC error" }[expect];
+    return got === want ? undefined : `expected ${want}, got ${got}`;
+  };
+
+  /** Runs one session; returns false if it had to be aborted (no point starting more). */
   const run = async (name, scenario) => {
     const s = startSession(outDir);
     const exchanges = [];
@@ -233,32 +264,56 @@ async function main() {
       notify: s.notify,
       raw: s.raw,
     };
-    await scenario(wrapped, (label, ex) => {
+    const rec = (label, ex, expect = "result", check) => {
       exchanges.push({ label, send: normalize(ex.send), receive: normalize(ex.receive) });
+      const issues = [];
+      for (const m of ex.receive) if ("__unparseable_stdout_line" in m) issues.push(`non-JSON on stdout: ${m.__unparseable_stdout_line.slice(0, 120)}`);
+      const wrong = mismatch(ex, expect);
+      if (wrong) issues.push(wrong);
+      const response = typeof ex.send === "object" ? ex.receive.find((m) => m.id === ex.send.id && !("method" in m)) : undefined;
+      const checked = !wrong && check && response?.result ? check(response) : undefined;
+      if (checked) issues.push(checked);
+      for (const issue of issues) problems.push(`[${name}] ${label}: ${issue}`);
       const last = ex.receive.at(-1);
-      const answered = typeof ex.send !== "object" || !("id" in ex.send) || ex.receive.some((m) => m.id === ex.send.id);
-      if (!answered) problems.push(`[${name}] ${label}: no response`);
-      process.stderr.write(`[${name}] ${label}${!answered ? " → NO RESPONSE" : last?.error ? " → JSON-RPC error" : last?.result?.isError ? " → isError" : ""}\n`);
-    });
+      process.stderr.write(`[${name}] ${label}${last?.error ? " → JSON-RPC error" : last?.result?.isError ? " → isError" : ""}${issues.length ? `  ✗ ${issues.join("; ")}` : ""}\n`);
+    };
+    let completed = true;
+    try {
+      await scenario(wrapped, rec);
+    } catch (e) {
+      problems.push(`[${name}] aborted: ${e.message}`);
+      process.stderr.write(`[${name}] ✗ aborted: ${e.message}\n`);
+      completed = false;
+    }
     const { exit, stderr } = await s.close();
     if (exit.code !== 0) problems.push(`[${name}] server exited with ${JSON.stringify(exit)}`);
     transcript.sessions.push({ name, exchanges, exit, stderr: normalize(stderr) });
+    return completed;
   };
 
   try {
-    await run("main", mainSession);
-    for (const v of ["2025-11-25", "2025-03-26", "2024-11-05", "1999-01-01", "garbage"]) {
-      await run(`negotiate ${v}`, async (s, rec) => rec("initialize", await s.request(1, ...init(v))));
+    const sessions = [
+      ["main", mainSession],
+      ...["2025-11-25", "2025-03-26", "2024-11-05", "1999-01-01"].map((v) => [
+        `negotiate ${v}`,
+        async (s, rec) => rec("initialize", await s.request(1, ...init(v))),
+      ]),
+      // The SDK accepted any string here; tmcp rejects a malformed version.
+      ["negotiate garbage", async (s, rec) => rec("initialize", await s.request(1, ...init("garbage")), "any")],
+      ["before initialize", async (s, rec) => rec("tools/list before initialize", await s.request(1, "tools/list"))],
+      [
+        "malformed input",
+        async (s, rec) => {
+          rec("initialize", await s.request(1, ...init("2025-06-18")));
+          rec("invalid JSON line", await s.raw("{not json"), "none");
+          rec("request without jsonrpc field", await s.raw(JSON.stringify({ id: 2, method: "ping" })), "any");
+          rec("ping still works", await s.request(3, "ping"));
+        },
+      ],
+    ];
+    for (const [name, scenario] of sessions) {
+      if (!(await run(name, scenario))) break;
     }
-    await run("before initialize", async (s, rec) => {
-      rec("tools/list before initialize", await s.request(1, "tools/list"));
-    });
-    await run("malformed input", async (s, rec) => {
-      rec("initialize", await s.request(1, ...init("2025-06-18")));
-      rec("invalid JSON line", await s.raw("{not json"));
-      rec("request without jsonrpc field", await s.raw(JSON.stringify({ id: 2, method: "ping" })));
-      rec("ping still works", await s.request(3, "ping"));
-    });
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }

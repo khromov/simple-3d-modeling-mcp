@@ -57,8 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # npm installs the locked dependencies and builds (the npm pack test needs
-      # npx too); Bun is the runtime under test.
+      # npm installs the locked dependencies and builds; Bun is the runtime under test.
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -77,8 +76,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # package-manifest.test.ts checks npm pack/publish output, which would run
+      # npm itself under Bun; the Node jobs cover it.
       - name: Test (Bun runtime)
-        run: bun --bun vitest run
+        run: bun --bun vitest run --exclude tests/package-manifest.test.ts
 
       - name: MCP stdio smoke test (server running under Bun)
         run: bun scripts/capture-mcp-traffic.mjs "${{ runner.temp }}/mcp-traffic.json"
@@ -105,3 +106,9 @@ jobs:
 
       - name: Inspect bundle
         run: npx --yes @anthropic-ai/mcpb info simple-3d-modeling.mcpb
+
+      # Runs the server exactly as packed, with only its pruned production dependencies.
+      - name: MCP stdio smoke test (bundled server)
+        run: |
+          unzip -q simple-3d-modeling.mcpb -d "$RUNNER_TEMP/bundle"
+          node scripts/capture-mcp-traffic.mjs "$RUNNER_TEMP/mcpb-traffic.json" "$RUNNER_TEMP/bundle/server/dist/index.js"
