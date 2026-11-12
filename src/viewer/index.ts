@@ -2,4 +2,3 @@ export { ViewerServer, buildSlicerCommand, encodeViewerMesh } from "./viewer-ser
 export type { ViewerServerOptions } from "./viewer-server.js";
 export { ViewerState } from "./viewer-state.js";
 export type { ModelVersion, ModelHistoryEntry, AddVersionInput } from "./viewer-state.js";
-export { generateViewerHtml } from "./viewer-html.js";

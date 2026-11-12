@@ -5,19 +5,20 @@
  * (blocks DNS rebinding) and, when a browser sends an Origin, it must be the
  * viewer's own origin (blocks other web pages from reading models over the
  * WebSocket or triggering the slicer endpoint).
+ *
+ * The page itself is a Vite + Svelte app (viewer/ in the repository), built
+ * into dist/viewer-ui with three.js bundled in, so it needs no CDN.
  */
 
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { platform, tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { isDefaultColor } from "../geometry/mesh.js";
-import { ASSETS_DIR } from "../paths.js";
+import { VIEWER_UI_DIR } from "../paths.js";
 import { write3mf, writeBinaryStl } from "../geometry/writers.js";
-import { generateViewerHtml } from "./viewer-html.js";
 import { ViewerState, type AddVersionInput, type ModelVersion } from "./viewer-state.js";
 
 const SLICERS: Record<string, { mac: string; win: string; linux: string }> = {
@@ -78,18 +79,49 @@ function safeFileName(title: string): string {
   return (title || "model").replace(/[^A-Za-z0-9 _.-]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "model";
 }
 
-/** three.js files vendored into assets/vendor/three by scripts/fetch-assets.mjs. */
-function resolveThreeFiles(): Record<string, string> {
-  const dir = join(ASSETS_DIR, "vendor", "three");
-  return {
-    "/vendor/three/three.module.js": join(dir, "three.module.js"),
-    "/vendor/three/three.core.js": join(dir, "three.core.js"),
-    "/vendor/three/addons/controls/OrbitControls.js": join(dir, "addons", "controls", "OrbitControls.js"),
-  };
+const PAGE_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; img-src 'self' data:";
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".json": "application/json",
+  ".woff2": "font/woff2",
+};
+
+/**
+ * Maps URL paths ("/index.html", "/assets/index-abc123.js") to the files of the
+ * built page. Only files listed here are ever served, so request paths never
+ * reach the filesystem. Empty when the page has not been built.
+ */
+async function listUiFiles(dir: string, prefix = ""): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of entries) {
+    const urlPath = `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      for (const [k, v] of await listUiFiles(join(dir, entry.name), urlPath)) files.set(k, v);
+    } else if (entry.isFile()) {
+      files.set(urlPath, join(dir, entry.name));
+    }
+  }
+  return files;
 }
 
 export interface ViewerServerOptions {
   maxVersions?: number;
+  /** Directory of the built viewer page (default: dist/viewer-ui in this package). */
+  uiDir?: string;
 }
 
 export class ViewerServer {
@@ -99,13 +131,15 @@ export class ViewerServer {
   private _port = 0;
   private _starting: Promise<string> | null = null;
   private readonly _clients = new Set<WebSocket>();
-  private readonly _vendor = resolveThreeFiles();
-  private readonly _vendorCache = new Map<string, Buffer>();
+  private readonly _uiDir: string;
+  private _uiFiles: Promise<Map<string, string>> | null = null;
+  private readonly _uiCache = new Map<string, Buffer>();
   readonly state: ViewerState;
 
   constructor(opts: ViewerServerOptions | number = {}) {
     const o = typeof opts === "number" ? { maxVersions: opts } : opts;
     this.state = new ViewerState(o.maxVersions ?? 30);
+    this._uiDir = o.uiDir ?? VIEWER_UI_DIR;
   }
 
   get isRunning(): boolean {
@@ -175,27 +209,7 @@ export class ViewerServer {
     const url = new URL(req.url ?? "/", `http://localhost:${this._port}`);
     const path = url.pathname;
 
-    if (req.method === "GET" && path === "/") {
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-cache",
-        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; img-src 'self' data:",
-        "X-Content-Type-Options": "nosniff",
-      });
-      res.end(generateViewerHtml());
-      return;
-    }
-
-    if (req.method === "GET" && this._vendor[path]) {
-      let body = this._vendorCache.get(path);
-      if (!body) {
-        body = await readFile(this._vendor[path]);
-        this._vendorCache.set(path, body);
-      }
-      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "max-age=86400" });
-      res.end(body);
-      return;
-    }
+    if (req.method === "GET" && (await this.serveUi(path, res))) return;
 
     let m = /^\/mesh\/(\d+)$/.exec(path);
     if (req.method === "GET" && m) {
@@ -250,6 +264,44 @@ export class ViewerServer {
     }
 
     this.notFound(res);
+  }
+
+  /**
+   * Serves a file of the built page; returns false when `path` is not one.
+   * Every page load lists the build again, so a first build or a rebuild of
+   * the viewer needs no server restart. Only files under /assets/ are kept in
+   * memory: Vite puts a content hash in their names.
+   */
+  private async serveUi(path: string, res: ServerResponse): Promise<boolean> {
+    const isPage = path === "/" || path === "/index.html";
+    if (isPage || !this._uiFiles) this._uiFiles = listUiFiles(this._uiDir);
+    const files = await this._uiFiles;
+    const urlPath = isPage ? "/index.html" : path;
+    const file = files.get(urlPath);
+    const hashed = urlPath.startsWith("/assets/");
+    let body = hashed ? this._uiCache.get(urlPath) : undefined;
+    if (file && !body) {
+      try {
+        body = await readFile(file);
+        if (hashed) this._uiCache.set(urlPath, body);
+      } catch {
+        // Deleted since it was listed (a rebuild is under way).
+      }
+    }
+    if (!body) {
+      if (!isPage) return false;
+      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("The viewer page has not been built. Run `npm run build`.");
+      return true;
+    }
+    res.writeHead(200, {
+      "Content-Type": CONTENT_TYPES[extname(urlPath)] ?? "application/octet-stream",
+      "Cache-Control": hashed ? "max-age=31536000, immutable" : "no-cache",
+      ...(isPage ? { "Content-Security-Policy": PAGE_CSP } : {}),
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(body);
+    return true;
   }
 
   private notFound(res: ServerResponse): void {

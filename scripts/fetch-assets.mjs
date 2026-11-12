@@ -6,7 +6,6 @@
  *   assets/openscad/           OpenSCAD's official WebAssembly build (nightly snapshot, pinned date, sha256-verified)
  *   assets/fonts/              DejaVu TTFs (from the dejavu-fonts-ttf devDependency)
  *   assets/libraries/BOSL2/    BOSL2 library (downloaded at a pinned tag, sha256-verified)
- *   assets/vendor/three/       the three.js files the browser viewer loads (from the three devDependency)
  *
  * The directory is git-ignored and shipped in the npm package / .mcpb bundle.
  * Re-running is cheap: it exits early when assets/manifest.json matches.
@@ -54,16 +53,7 @@ const require = createRequire(import.meta.url);
 const fontPkgDir = dirname(require.resolve("dejavu-fonts-ttf/package.json"));
 const fontVersion = JSON.parse(readFileSync(join(fontPkgDir, "package.json"), "utf8")).version;
 
-const threeDir = dirname(dirname(require.resolve("three")));
-const threeVersion = JSON.parse(readFileSync(join(threeDir, "package.json"), "utf8")).version;
-const THREE_FILES = {
-  "three.module.js": "build/three.module.js",
-  "three.core.js": "build/three.core.js",
-  "addons/controls/OrbitControls.js": "examples/jsm/controls/OrbitControls.js",
-  LICENSE: "LICENSE",
-};
-
-const wanted = { openscad: OPENSCAD.version, bosl2: BOSL2.tag, fonts: fontVersion, fontFiles: FONT_FILES, three: threeVersion };
+const wanted = { openscad: OPENSCAD.version, bosl2: BOSL2.tag, fonts: fontVersion, fontFiles: FONT_FILES };
 
 if (existsSync(MANIFEST)) {
   try {
@@ -85,14 +75,6 @@ mkdirSync(fontsDir, { recursive: true });
 for (const f of FONT_FILES) copyFileSync(join(fontPkgDir, "ttf", f), join(fontsDir, f));
 copyFileSync(join(fontPkgDir, "LICENSE"), join(fontsDir, "LICENSE"));
 console.log(`assets: copied ${FONT_FILES.length} DejaVu fonts (${fontVersion})`);
-
-// --- three.js (viewer) ------------------------------------------------------
-for (const [dest, src] of Object.entries(THREE_FILES)) {
-  const target = join(ASSETS, "vendor", "three", dest);
-  mkdirSync(dirname(target), { recursive: true });
-  copyFileSync(join(threeDir, src), target);
-}
-console.log(`assets: copied three.js ${threeVersion} viewer files`);
 
 // --- OpenSCAD (WebAssembly) --------------------------------------------------
 const zip = await download("OpenSCAD", OPENSCAD.url, OPENSCAD.sha256);

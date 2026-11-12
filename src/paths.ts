@@ -37,6 +37,8 @@ export const FONTS_DIR = join(ASSETS_DIR, "fonts");
 export const LIBRARIES_DIR = join(ASSETS_DIR, "libraries");
 /** OpenSCAD's official WebAssembly build: openscad.mjs (Emscripten glue) + openscad.wasm. */
 export const OPENSCAD_WASM_DIR = join(ASSETS_DIR, "openscad");
+/** The browser viewer page, built from viewer/ by Vite (`npm run build:viewer`). */
+export const VIEWER_UI_DIR = join(PACKAGE_ROOT, "dist", "viewer-ui");
 
 /** Names of libraries bundled under assets/libraries (e.g. ["BOSL2"]). */
 export function bundledLibraries(): string[] {
