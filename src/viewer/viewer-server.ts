@@ -268,7 +268,7 @@ export class ViewerServer {
       if (!model) return this.notFound(res);
       const slicer = url.searchParams.get("slicer") ?? "default";
       let command: { cmd: string; args: string[] };
-      const dir = join(tmpdir(), "simple-3d-modeling-mcp", "slicer");
+      const dir = join(tmpdir(), "sketchpad-3d-model-mcp", "slicer");
       const fmt = slicerFileFormat(slicer);
       const filePath = join(dir, `${safeFileName(model.title)}-v${model.version}.${fmt}`);
       try {

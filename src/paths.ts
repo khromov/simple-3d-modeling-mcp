@@ -7,8 +7,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Matches "simple-3d-modeling-mcp" and scoped copies such as "@khromov/simple-3d-modeling-mcp". */
-const PACKAGE_NAME_RE = /^(@[^/]+\/)?simple-3d-modeling-mcp$/;
+/** Matches "sketchpad-3d-model-mcp" and scoped copies (forks) such as "@someone/sketchpad-3d-model-mcp". */
+const PACKAGE_NAME_RE = /^(@[^/]+\/)?sketchpad-3d-model-mcp$/;
 
 function findPackageRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -25,7 +25,7 @@ function findPackageRoot(): string {
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("Could not locate the simple-3d-modeling-mcp package root");
+  throw new Error("Could not locate the sketchpad-3d-model-mcp package root");
 }
 
 export const PACKAGE_ROOT = findPackageRoot();

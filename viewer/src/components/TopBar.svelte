@@ -24,8 +24,7 @@
 <header>
   <div class="brand">
     <Logo size={26} />
-    <span class="name">Simple 3D Modeling</span>
-    <span class="sub">Viewer</span>
+    <span class="name">Sketchpad 3D</span>
   </div>
 
   <div class="actions">
@@ -51,15 +50,6 @@
   }
   .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .name { font-weight: 650; font-size: 17px; letter-spacing: -0.01em; white-space: nowrap; }
-  .sub {
-    padding-left: 12px;
-    border-left: var(--rule);
-    color: var(--ink-soft);
-    font-weight: 600;
-    font-size: 11px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-  }
 
   .actions { display: flex; align-items: center; gap: 14px; }
   .status {
@@ -81,7 +71,6 @@
   .theme { width: 40px; padding: 0; }
 
   @media (max-width: 560px) {
-    .sub { display: none; }
     .status { font-size: 0; gap: 0; } /* keep the dot, drop the words; screen readers still get them */
   }
 </style>

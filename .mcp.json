@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "simple-3d-modeling-local": {
+    "sketchpad-3d-local": {
       "type": "stdio",
       "command": "node",
       "args": ["dist/index.js"]

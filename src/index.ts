@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * simple-3d-modeling-mcp — zero-setup MCP server for LLM-driven 3D modelling.
+ * sketchpad-3d-model-mcp — zero-setup MCP server for LLM-driven 3D modelling.
  * Uses bundled OpenSCAD WASM, or a native OpenSCAD when available.
  */
 
@@ -10,7 +10,7 @@ import { readConfig } from "./config.js";
 import { createEngine } from "./engine/index.js";
 import { createServer } from "./server.js";
 
-const log = (message: string) => console.error(`[simple-3d-modeling-mcp] ${message}`);
+const log = (message: string) => console.error(`[sketchpad-3d-model-mcp] ${message}`);
 
 async function main() {
   const { config, warnings } = readConfig();

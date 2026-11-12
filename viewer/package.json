@@ -1,5 +1,5 @@
 {
-  "name": "@khromov/simple-3d-modeling-mcp-viewer",
+  "name": "sketchpad-3d-model-mcp-viewer",
   "private": true,
   "description": "Browser viewer page (Vite + Svelte), built into ../dist/viewer-ui and served by src/viewer/viewer-server.ts",
   "type": "module",

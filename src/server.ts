@@ -212,7 +212,7 @@ function sanitizeName(name: string): string {
 
 export function createServer(opts: CreateServerOptions): AppServer {
   const server: AppMcpServer = new McpServer(
-    { name: "simple-3d-modeling-mcp", version: PACKAGE_VERSION },
+    { name: "sketchpad-3d-model-mcp", version: PACKAGE_VERSION },
     {
       adapter: new ZodInputSchemaAdapter(),
       capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
