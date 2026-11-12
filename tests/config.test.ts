@@ -29,8 +29,7 @@ describe("readConfig", () => {
 
   it("ignores blank and unsubstituted .mcpb placeholders", () => {
     const { config, warnings } = readConfig({
-      OPENSCAD_PATH: "${user_config.openscad_path}",
-      OPENSCAD_OUTPUT_DIR: "  ",
+      OPENSCAD_OUTPUT_DIR: "${user_config.output_dir}",
       OPENSCAD_AUTO_OPEN_VIEWER: "",
     });
     expect(config.outputDir).toBe(defaultOutputDir());
@@ -43,13 +42,6 @@ describe("readConfig", () => {
     expect(config.timeoutMs).toBe(120_000);
     expect(config.outputDir).toBe(defaultOutputDir());
     expect(warnings).toHaveLength(2);
-  });
-
-  it("warns that the native OpenSCAD settings are gone", () => {
-    const { warnings } = readConfig({ OPENSCAD_ENGINE: "native", OPENSCAD_PATH: "/opt/openscad", OPENSCAD_WORK_DIR: "/tmp/x" });
-    expect(warnings).toEqual(
-      ["OPENSCAD_ENGINE", "OPENSCAD_PATH", "OPENSCAD_WORK_DIR"].map((name) => `Ignoring ${name}: OpenSCAD always runs bundled as WebAssembly.`),
-    );
   });
 
   it("clamps the timeout", () => {

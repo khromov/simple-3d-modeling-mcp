@@ -17,9 +17,6 @@ export interface ServerConfig {
   autoOpenViewer: boolean;
 }
 
-/** Settings of the removed native OpenSCAD engine, still set by older configs. */
-const REMOVED = ["OPENSCAD_ENGINE", "OPENSCAD_PATH", "OPENSCAD_WORK_DIR"];
-
 /** Treat blank values and unsubstituted placeholders (e.g. "${user_config.x}") as unset. */
 function clean(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -43,9 +40,6 @@ export function defaultOutputDir(): string {
 export function readConfig(env: NodeJS.ProcessEnv = process.env): { config: ServerConfig; warnings: string[] } {
   const warnings: string[] = [];
 
-  for (const name of REMOVED) {
-    if (clean(env[name]) !== undefined) warnings.push(`Ignoring ${name}: OpenSCAD always runs bundled as WebAssembly.`);
-  }
 
   let timeoutMs = 120_000;
   const timeout = clean(env.OPENSCAD_TIMEOUT);

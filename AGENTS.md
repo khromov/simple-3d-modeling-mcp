@@ -29,7 +29,7 @@ Node 22, 24 or 26 (see `engines`; `.nvmrc` pins 22). Run `npm run typecheck` and
 ```
 src/index.ts            stdio entry point: reads env config, creates the WASM engine, starts the server (tmcp StdioTransport)
 src/server.ts           every MCP tool and resource (tmcp `server.tool` / `server.resource` + titles + annotations)
-src/config.ts           OPENSCAD_* environment variables (warns about removed ones)
+src/config.ts           OPENSCAD_* environment variables
 src/model-service.ts    evaluates models and caches meshes per (engine, source hash, params)
 src/paths.ts            package root / assets / version lookup (works from src/, dist/ and the .mcpb)
 src/cheatsheet.ts       cheatsheet text + SERVER_INSTRUCTIONS sent to clients

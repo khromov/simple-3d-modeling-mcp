@@ -140,8 +140,6 @@ OpenSCAD runs as its official WebAssembly build (a pinned nightly snapshot) with
 | `OPENSCAD_AUTO_OPEN_VIEWER` | Open the browser viewer on the first render | `true` |
 | `OPENSCAD_TIMEOUT` | Seconds before a single OpenSCAD run is stopped | `120` |
 
-`OPENSCAD_ENGINE`, `OPENSCAD_PATH` and `OPENSCAD_WORK_DIR` from older versions are ignored, with a warning in `get_version`.
-
 ## Compatibility Notes
 
 | Client | Inline Image Previews | Export / Validate / Viewer |
