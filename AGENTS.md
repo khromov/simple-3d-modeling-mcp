@@ -15,6 +15,7 @@ npm run build        # clean dist/, fetch assets, compile with tsc
 npm run typecheck    # sources (tsconfig.json) and tests (tsconfig.test.json)
 npm test             # vitest; runs `npm run assets` first
 npx vitest run tests/rendering/software-renderer.test.ts   # a single file
+bun --bun vitest run # the same suite on the Bun runtime (CI runs latest Bun)
 npm run build:mcpb   # Claude Desktop extension → simple-3d-modeling.mcpb
 node scripts/capture-mcp-traffic.mjs out.json   # record the built server's stdio JSON-RPC traffic (diff two runs)
 ```
@@ -91,4 +92,4 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - **Do not edit versions by hand.** release-please manages `package.json`, `package-lock.json`, `mcpb/manifest.json` (via `extra-files`), `.release-please-manifest.json` and `CHANGELOG.md`.
 - Merging the release PR tags `vX.Y.Z`. `.github/workflows/release.yml` then type-checks, tests, publishes to npm with trusted publishing (OIDC, provenance, no token), and uploads the `.mcpb` to the GitHub release. `package.json` `repository.url` must stay `git+https://github.com/khromov/simple-3d-modeling-mcp.git`, or OIDC publishing fails.
 - Keep these in sync: the npm version in `release.yml` and `tests/package-manifest.test.ts` (currently 12.2.2), and the Node range in `package.json` `engines` and `mcpb/manifest.json` `compatibility.runtimes.node`.
-- CI (`.github/workflows/ci.yml`) runs Linux/macOS/Windows × Node 22/24/26 plus an `.mcpb` build. Workflows on PRs opened by release-please need a manual "Approve and run".
+- CI (`.github/workflows/ci.yml`) runs Linux/macOS/Windows × Node 22/24/26 and × latest Bun (tests via `bun --bun vitest run`), each followed by a stdio smoke test with `scripts/capture-mcp-traffic.mjs`, plus an `.mcpb` build. Workflows on PRs opened by release-please need a manual "Approve and run".
