@@ -27,6 +27,12 @@
   --grain-opacity: 0.08;
   --grain-filter: none;
   --vignette: rgb(110 90 50 / 0.1);
+  --code-keyword: #b8321c;
+  --code-builtin: #1f4fa3;
+  --code-number: #9a5b00;
+  --code-string: #2a7a45;
+  --code-special: #7b3a99;
+  --code-comment: #8b877c;
 
   --font-sans: "Jost Variable", Futura, "Century Gothic", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -56,6 +62,12 @@
   --grain-opacity: 0.13;
   --grain-filter: invert(1);
   --vignette: rgb(4 18 42 / 0.45);
+  --code-keyword: #ff8f7d;
+  --code-builtin: #8cc4ff;
+  --code-number: #ffcf70;
+  --code-string: #8fe3aa;
+  --code-special: #e4adff;
+  --code-comment: #89a2c6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -79,6 +91,12 @@
     --grain-opacity: 0.13;
     --grain-filter: invert(1);
     --vignette: rgb(4 18 42 / 0.45);
+    --code-keyword: #ff8f7d;
+    --code-builtin: #8cc4ff;
+    --code-number: #ffcf70;
+    --code-string: #8fe3aa;
+    --code-special: #e4adff;
+    --code-comment: #89a2c6;
   }
 }
 
@@ -91,8 +109,9 @@ body {
   font: 450 13px/1.4 var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
-/* Paper grain over the whole sheet, the model included, like a print. */
-body::after {
+/* Paper grain over the whole sheet, the model included, like a print (and over full-screen sheets, which sit above it). */
+body::after,
+dialog.sheet::after {
   content: "";
   position: fixed;
   inset: 0;

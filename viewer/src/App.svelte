@@ -1,5 +1,6 @@
 <script lang="ts">
   import Appearance from "./components/Appearance.svelte";
+  import Code from "./components/Code.svelte";
   import Dimensions from "./components/Dimensions.svelte";
   import Export from "./components/Export.svelte";
   import History from "./components/History.svelte";
@@ -89,6 +90,7 @@
       </Section>
       <Dimensions model={model?.info ?? null} />
       <History entries={connection.history} active={model?.info.version} onselect={(version) => connection.requestModel(version)} />
+      <Code version={model?.info.version} title={model?.info.title} />
       <Appearance bind:color={modelColor} />
       {#if model}
         <Export version={model.info.version} />

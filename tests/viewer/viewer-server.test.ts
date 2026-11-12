@@ -168,6 +168,21 @@ describe("ViewerServer", () => {
     expect((await fetch(`${url}/model/99`)).status).toBe(404);
   });
 
+  it("serves each version's source, read-only, as JSON", async () => {
+    server = new ViewerServer();
+    const url = await server.start();
+    const mesh = box([0, 0, 0], [1, 1, 1]);
+    const source = { code: "w = 1;\ncube(w);\n", file: "part.scad", params: ["w=2"] };
+    server.pushModel({ mesh, stats: computeStats(mesh), title: "With source", key: "a", source });
+    server.pushModel({ mesh, stats: computeStats(mesh), title: "Without", key: "b" });
+    const res = await fetch(`${url}/source/1`);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual(source);
+    expect((await fetch(`${url}/source/2`)).status).toBe(404);
+    expect((await fetch(`${url}/source/99`)).status).toBe(404);
+    expect(await rawGet(url, "/source/1", { Host: "evil.example" })).toBe(403);
+  });
+
   it("reports running state", async () => {
     server = new ViewerServer();
     expect(server.isRunning).toBe(false);

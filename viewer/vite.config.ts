@@ -66,6 +66,7 @@ function sampleViewerServer(): Plugin {
           proxy: {
             "/ws": { ...api, ws: true },
             "/mesh/": api,
+            "/source/": api,
             "/model/": api,
             "/open-in-slicer/": api,
           },

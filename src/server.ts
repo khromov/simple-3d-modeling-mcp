@@ -15,6 +15,7 @@ import { z } from "zod";
 import { OPENSCAD_CHEATSHEET, SERVER_INSTRUCTIONS } from "./cheatsheet.js";
 import { NativeEngine } from "./engine/native-engine.js";
 import { formatLog } from "./engine/output.js";
+import { paramAssignments } from "./engine/params.js";
 import { expandHome, prepareSource, resolveScadPath } from "./engine/source.js";
 import type { Engine, EngineLog, Params, PreparedSource } from "./engine/types.js";
 import { UserError } from "./errors.js";
@@ -245,10 +246,12 @@ export function createServer(opts: CreateServerOptions): AppServer {
     return { src, outcome, engine: models.engine };
   }
 
-  async function publish(model: Model, src: PreparedSource, title?: string): Promise<string | undefined> {
+  async function publish(model: Model, src: PreparedSource, title?: string, params?: Params): Promise<string | undefined> {
     try {
       if (!viewer.isRunning) await viewer.start();
-      viewer.pushModel({ mesh: model.mesh, stats: model.stats, is2D: model.is2D, title: title?.trim() || defaultTitle(src), key: model.key });
+      const overrides = paramAssignments(params);
+      const source = { code: src.code, file: src.path ? basename(src.path) : undefined, params: overrides.length ? overrides : undefined };
+      viewer.pushModel({ mesh: model.mesh, stats: model.stats, is2D: model.is2D, title: title?.trim() || defaultTitle(src), key: model.key, source });
       if (autoOpen && !browserOpened && viewer.url) {
         browserOpened = true;
         openUrl(viewer.url);
@@ -297,7 +300,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
       const { src, outcome, engine } = await loadModel(args, args.params);
       if (!outcome.ok) return failure("Render failed.", outcome.log);
       const { model } = outcome;
-      const viewerUrl = await publish(model, src, args.title);
+      const viewerUrl = await publish(model, src, args.title, args.params);
       const preview = await renderPreview(
         { engine, src, params: args.params, mesh: model.mesh, colorscheme: args.colorscheme, softwareOnly: openscadPngBroken },
         { camera, projection: args.projection ?? "perspective", width: args.width ?? 1024, height: args.height ?? 768 },
@@ -336,7 +339,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
       const { src, outcome, engine } = await loadModel(args, args.params);
       if (!outcome.ok) return failure("Multi-view render failed.", outcome.log);
       const { model } = outcome;
-      const viewerUrl = await publish(model, src, args.title);
+      const viewerUrl = await publish(model, src, args.title, args.params);
       const result = await renderMultiView(
         { engine, src, params: args.params, mesh: model.mesh, softwareOnly: openscadPngBroken },
         { views, cellWidth: args.width ?? 512, cellHeight: args.height ?? 512, projection: args.projection ?? "auto" },
@@ -374,7 +377,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
       const { src, outcome } = await loadModel(args, args.params);
       if (!outcome.ok) return failure("Turntable render failed.", outcome.log);
       const { model } = outcome;
-      const viewerUrl = await publish(model, src, args.title);
+      const viewerUrl = await publish(model, src, args.title, args.params);
       const apng = renderTurntable(model.mesh, {
         frames: args.frames ?? 24,
         width: args.width ?? 512,

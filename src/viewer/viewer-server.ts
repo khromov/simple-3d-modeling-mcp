@@ -234,6 +234,15 @@ export class ViewerServer {
       return;
     }
 
+    m = /^\/source\/(\d+)$/.exec(path);
+    if (req.method === "GET" && m) {
+      const source = this.state.getVersion(Number(m[1]))?.source;
+      if (!source) return this.notFound(res);
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
+      res.end(JSON.stringify(source));
+      return;
+    }
+
     m = /^\/model\/(\d+)(?:\.(stl|3mf))?$/.exec(path);
     if (req.method === "GET" && m) {
       const model = this.state.getVersion(Number(m[1]));

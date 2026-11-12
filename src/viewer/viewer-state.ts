@@ -1,6 +1,16 @@
 import type { Mesh } from "../geometry/mesh.js";
 import type { MeshStats } from "../geometry/stats.js";
 
+/** The OpenSCAD source a version was rendered from, shown read-only in the viewer. */
+export interface ModelSource {
+  /** The main file's code (included and used files are not part of it). */
+  code: string;
+  /** File name, when the model was rendered from a file on disk. */
+  file?: string;
+  /** Variable overrides (`name=value`) applied on top of the code with -D. */
+  params?: string[];
+}
+
 export interface ModelVersion {
   version: number;
   title: string;
@@ -10,6 +20,7 @@ export interface ModelVersion {
   is2D: boolean;
   /** Identifies the source+params that produced the mesh (dedupes repeat pushes). */
   key?: string;
+  source?: ModelSource;
 }
 
 export interface ModelHistoryEntry {
@@ -24,6 +35,7 @@ export interface AddVersionInput {
   stats: MeshStats;
   is2D?: boolean;
   key?: string;
+  source?: ModelSource;
 }
 
 export class ViewerState {
@@ -58,6 +70,7 @@ export class ViewerState {
       stats: input.stats,
       is2D: input.is2D ?? false,
       key: input.key,
+      source: input.source,
     };
     this._versions.push(entry);
     while (this._versions.length > this._maxVersions) this._versions.shift();

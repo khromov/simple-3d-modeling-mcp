@@ -117,6 +117,7 @@ On the first render an interactive viewer opens in your browser (set `OPENSCAD_A
 - **Live updates** — refreshes on every render; your camera position is kept while you iterate
 - **History** — every version, named after the render's `title`
 - **Dimensions** — size, true volume and triangle count
+- **Code** — the OpenSCAD source of each version, read-only, with syntax highlighting, `-D` overrides, copy and a full-screen view
 - **Colours** — `color()` is shown; preset swatches or a colour picker set the colour of uncoloured parts
 - **Export** — download STL or 3MF, or open the model in Bambu Studio, OrcaSlicer, PrusaSlicer, Cura or Creality Print (sent as a 3MF, so Bambu Studio 2.5+ maps its colours to filaments)
 - **Controls** — rotate (drag), zoom (scroll), pan (right- or middle-drag), edges, wireframe, auto-rotate, grid

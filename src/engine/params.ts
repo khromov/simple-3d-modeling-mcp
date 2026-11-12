@@ -25,6 +25,11 @@ export function paramArgs(params: Params | undefined): string[] {
   return args;
 }
 
+/** Variable overrides as the assignments OpenSCAD receives with -D (`name=value`). */
+export function paramAssignments(params: Params | undefined): string[] {
+  return paramArgs(params).filter((_, i) => i % 2 === 1);
+}
+
 /** Deterministic serialisation for cache keys. */
 export function stableParams(params: Params | undefined): string {
   if (!params) return "";
