@@ -1,5 +1,4 @@
 import type { Mesh } from "../geometry/mesh.js";
-import type { CameraSpec, Projection } from "../rendering/camera.js";
 
 export type ParamValue = string | number | boolean | ParamValue[];
 export type Params = Record<string, ParamValue>;
@@ -32,7 +31,7 @@ export interface EngineLog {
 export interface RunJob {
   src: PreparedSource;
   params?: Params;
-  /** Output file extension, e.g. "off", "stl", "png", "csg". */
+  /** Output file extension, e.g. "off", "stl", "dxf", "csg". */
   outputExt: string;
   /** Extra command-line arguments (camera, export format, …). */
   args?: string[];
@@ -67,18 +66,7 @@ export interface ExportResult {
   log: EngineLog;
 }
 
-export interface PngRenderOptions {
-  camera: CameraSpec;
-  projection: Projection;
-  width: number;
-  height: number;
-  colorscheme?: string;
-  params?: Params;
-}
-
 export interface EngineCapabilities {
-  /** Engine can render PNG previews itself (native OpenSCAD with OpenGL). */
-  png: boolean;
   /** Manifold geometry backend available (fast booleans, coloured OFF output). */
   manifold: boolean;
   /** Formats the engine can export directly via OpenSCAD. */
@@ -86,16 +74,14 @@ export interface EngineCapabilities {
 }
 
 export interface Engine {
-  readonly name: "wasm" | "native";
+  readonly name: "wasm";
   readonly capabilities: EngineCapabilities;
   /** Low-level: run OpenSCAD once. */
   run(job: RunJob): Promise<RunResult>;
   /** Evaluate the model to a triangle mesh (with colours when available). */
   computeMesh(src: PreparedSource, params?: Params): Promise<MeshResult>;
-  /** Export via OpenSCAD itself (formats not built from the mesh, e.g. amf, dxf, svg, csg). */
+  /** Export via OpenSCAD itself (formats not built from the mesh, e.g. dxf, svg, csg). */
   exportFormat(src: PreparedSource, format: string, params?: Params): Promise<ExportResult>;
-  /** Native-only: OpenSCAD-rendered PNG preview. */
-  renderPng?(src: PreparedSource, opts: PngRenderOptions): Promise<RunResult>;
   /** Parse and evaluate without generating geometry. */
   validate(src: PreparedSource, params?: Params): Promise<{ ok: boolean; log: EngineLog }>;
   version(): Promise<string>;

@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-Sketchpad 3D (`sketchpad-3d-model-mcp` on npm, formerly `@khromov/simple-3d-modeling-mcp`) is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly by default (zero setup, OpenSCAD's official nightly build); a native OpenSCAD is used when one with the Manifold backend is installed or `OPENSCAD_PATH` is set. It also ships a local browser viewer (a Vite + Svelte 5 app in `viewer/`) and a Claude Desktop `.mcpb` bundle.
+Sketchpad 3D (`sketchpad-3d-model-mcp` on npm, formerly `@khromov/simple-3d-modeling-mcp`) is an MCP server (stdio) that lets AI assistants write OpenSCAD models, preview them, and export files. OpenSCAD runs bundled as WebAssembly (zero setup, OpenSCAD's official nightly build); an installed OpenSCAD is never used. It also ships a local browser viewer (a Vite + Svelte 5 app in `viewer/`) and a Claude Desktop `.mcpb` bundle.
 
 ## Commands
 
@@ -27,9 +27,9 @@ Node 22, 24 or 26 (see `engines`; `.nvmrc` pins 22). Run `npm run typecheck` and
 ## Layout
 
 ```
-src/index.ts            stdio entry point: reads env config, picks the engine, starts the server (tmcp StdioTransport)
+src/index.ts            stdio entry point: reads env config, creates the WASM engine, starts the server (tmcp StdioTransport)
 src/server.ts           every MCP tool and resource (tmcp `server.tool` / `server.resource` + titles + annotations)
-src/config.ts           OPENSCAD_* environment variables
+src/config.ts           OPENSCAD_* environment variables (warns about removed ones)
 src/model-service.ts    evaluates models and caches meshes per (engine, source hash, params)
 src/paths.ts            package root / assets / version lookup (works from src/, dist/ and the .mcpb)
 src/cheatsheet.ts       cheatsheet text + SERVER_INSTRUCTIONS sent to clients
@@ -38,8 +38,6 @@ src/engine/
   base-engine.ts        shared computeMesh (OFF/STL, 2D fallback) / exportFormat / validate on top of run()
   wasm-engine.ts        worker pool with per-job timeouts; mounts fonts/BOSL2/user files into MEMFS
   wasm-worker.ts        runs one OpenSCAD WASM instance per job; compiles openscad.wasm once per worker (see constraints below)
-  native-engine.ts      OpenSCAD CLI: probing, arguments, temp-dir per job, PNG previews
-  engine-factory.ts     auto | wasm | native selection
   source.ts             code/file input → PreparedSource; collects include/use/import dependencies
   output.ts             classifies OpenSCAD output into errors / warnings / echo
   params.ts             `-D name=value` formatting and validation
@@ -76,7 +74,6 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 - **File safety**: `export` never overwrites unless `overwrite: true`, and the path extension must match the format. `read_scad_file` and `save_scad_file` only accept `.scad`. Relative paths resolve against the export folder, never the process cwd.
 - **Viewer security**: it binds to `127.0.0.1`, checks the Host header on every request and the Origin on WebSocket and POST, and serves only the files of the built page, with three.js bundled in (no CDN). The page's CSP allows scripts and styles from `'self'` only, so the UI must not use inline `<script>`, `<style>` or `style="…"` attributes. Keep all of this when changing the viewer.
 - **Viewer page** (`viewer/`): an npm workspace with its own devDependencies, including TypeScript 6, because svelte-check does not support the root's TypeScript 7 yet. The three.js code lives in `src/lib/scene.ts`; components drive it through `$effect`. If you change what the server sends (`encodeViewerMesh`, `updateMessage`, `GET /source/:version`), update `src/lib/mesh.ts` / `src/lib/protocol.ts`; `tests/viewer/viewer-ui.test.ts` round-trips the mesh format. The page connects its WebSocket to `/ws` (the server accepts any path), so the dev proxy can tell it apart from Vite's own. The WebGL canvas is transparent and the page paints the paper behind it, so the grid, edge and axis colours in `scene.ts` (`THEMES`) are matched to the tokens in `src/app.css`; change them together. Icons come from `@lucide/svelte` (import each icon from `@lucide/svelte/icons/<name>`); fonts are bundled from `@fontsource` packages, since the CSP only allows the page's own origin. Colours that vary per item (swatches) are SVG `fill` attributes, not inline styles.
-- **Native engine**: auto mode only selects an installed OpenSCAD that supports `--backend` (Manifold). Each run gets its own temp directory, which is deleted afterwards. `--render` is never passed for PNGs (OpenCSG preview is faster and keeps colours).
 - The package-root lookup in `paths.ts` matches the package name with a regex; update it if the package is renamed.
 
 ## Adding or changing a tool
@@ -89,7 +86,6 @@ Request flow: a tool handler calls `prepareSource({ code | file })`, then `Model
 ## Tests
 
 - `tests/helpers/meshes.ts` (`box`, `lShape`) builds meshes without OpenSCAD; use it for renderer and geometry tests.
-- `tests/engine/native-engine.test.ts` drives a fake `openscad` Node script, so it needs no OpenSCAD install. It is skipped on Windows.
 - WASM engine and server tests use the real bundled engine. Dispose engines and servers in `afterAll`.
 - Never write to real user folders in tests. Pass a temp `outputDir` to `createServer` and an `openUrl` stub so no browser opens.
 - The viewer server tests serve the built page from `dist/viewer-ui` (`pretest` builds it; build it yourself before running a single viewer test file with `npx vitest`). `tests/package-manifest.test.ts` rebuilds `dist/`, so `vitest.config.ts` puts it in its own project that runs after all the others.

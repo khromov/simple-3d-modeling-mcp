@@ -1,6 +1,6 @@
 /**
- * Behaviour shared by the WASM and native engines, built on a single
- * `run()` primitive that each engine implements.
+ * Engine behaviour (meshes, the 2D fallback, exports, validation) built on a
+ * single `run()` primitive that the engine implements.
  */
 
 import { parseOff, parseStl } from "../geometry/parse.js";
@@ -26,7 +26,7 @@ export function timeoutMessage(ms: number): string {
 }
 
 export abstract class BaseEngine implements Engine {
-  abstract readonly name: "wasm" | "native";
+  abstract readonly name: "wasm";
   abstract readonly capabilities: EngineCapabilities;
 
   abstract run(job: RunJob): Promise<RunResult>;

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * sketchpad-3d-model-mcp — zero-setup MCP server for LLM-driven 3D modelling.
- * Uses bundled OpenSCAD WASM, or a native OpenSCAD when available.
+ * sketchpad-3d-model-mcp — zero-setup MCP server for LLM-driven 3D modelling,
+ * with OpenSCAD bundled as WebAssembly.
  */
 
 import { StdioTransport } from "@tmcp/transport-stdio";
 import { readConfig } from "./config.js";
-import { createEngine } from "./engine/index.js";
+import { WasmEngine } from "./engine/index.js";
 import { createServer } from "./server.js";
 
 const log = (message: string) => console.error(`[sketchpad-3d-model-mcp] ${message}`);
@@ -16,24 +16,12 @@ async function main() {
   const { config, warnings } = readConfig();
   warnings.forEach(log);
 
-  const notes = [...warnings];
-  const engine = createEngine({
-    mode: config.engineMode,
-    executablePath: config.openscadPath,
-    workDir: config.workDir,
-    timeoutMs: config.timeoutMs,
-    log: (message) => {
-      notes.push(message);
-      log(message);
-    },
-  });
-  engine.then((e) => log(`using the ${e.name} engine`)).catch(() => {});
-
+  const engine = new WasmEngine({ timeoutMs: config.timeoutMs });
   const app = createServer({
     engine,
     outputDir: config.outputDir,
     autoOpenViewer: config.autoOpenViewer,
-    notes,
+    notes: warnings,
   });
 
   // The stdio transport also exits the process itself on stdin end, SIGINT and
