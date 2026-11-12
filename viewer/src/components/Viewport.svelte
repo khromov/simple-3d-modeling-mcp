@@ -54,11 +54,22 @@
         {/each}
       </ul>
     {/if}
-    <ul class="hint">
-      <li><kbd>Drag</kbd> rotate</li>
-      <li><kbd>Scroll</kbd> zoom</li>
-      <li><kbd>Right-drag</kbd> pan</li>
-    </ul>
+    <!-- The controls, folded into a "?" box that opens on hover, keyboard focus or a tap. -->
+    <div class="help">
+      <div class="hints" id="view-help">
+        <ul class="mouse">
+          <li><kbd>Drag</kbd> rotate</li>
+          <li><kbd>Scroll</kbd> zoom</li>
+          <li><kbd>Right-drag</kbd> or <kbd>Middle-drag</kbd> pan</li>
+        </ul>
+        <ul class="touch">
+          <li><kbd>Drag</kbd> rotate</li>
+          <li><kbd>Pinch</kbd> zoom</li>
+          <li><kbd>Two fingers</kbd> pan</li>
+        </ul>
+      </div>
+      <button class="toggle" aria-label="View controls" aria-describedby="view-help">?</button>
+    </div>
   </div>
 
   {#if mesh}
@@ -98,15 +109,51 @@
     gap: 10px;
     pointer-events: none;
   }
-  .hint {
+  .help {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 4px 14px;
+    align-items: stretch;
+    background: var(--paper-raised);
+    border: var(--rule);
+    box-shadow: 2px 2px 0 var(--shadow);
+    pointer-events: auto;
+  }
+  /* Folded to nothing until the box is hovered or focused; still read by screen readers. */
+  .hints {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-width 220ms ease, opacity 160ms ease;
+  }
+  .help:hover .hints, .help:focus-within .hints { max-width: 560px; opacity: 1; }
+  .hints ul {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    height: 100%;
+    padding: 0 12px;
     list-style: none;
     color: var(--ink-soft);
     font-size: 12px;
+    white-space: nowrap;
   }
+  /* Mouse controls, or the touch gestures on a touch screen. */
+  .hints .touch { display: none; }
+  @media (pointer: coarse) {
+    .hints .mouse { display: none; }
+    .hints .touch { display: flex; }
+  }
+  .toggle {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    background: none;
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1;
+    cursor: help;
+  }
+  .help:hover .toggle, .help:focus-within .toggle { background: var(--ink); color: var(--paper); }
+  .toggle:focus-visible { outline-offset: 3px; }
   kbd {
     margin-right: 3px;
     padding: 1px 5px;
@@ -136,8 +183,4 @@
     color: var(--ink-soft);
   }
   .empty .title { margin-top: 18px; color: var(--ink); font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
-
-  @media (max-width: 900px) {
-    .hint { display: none; }
-  }
 </style>

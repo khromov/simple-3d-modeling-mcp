@@ -21,6 +21,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshPhongMaterial,
+  MOUSE,
   Object3D,
   PerspectiveCamera,
   Scene,
@@ -122,6 +123,12 @@ export class ViewerScene {
     this.#controls = new OrbitControls(this.#camera, this.#renderer.domElement);
     this.#controls.enableDamping = true;
     this.#controls.autoRotateSpeed = 1.5;
+    // Middle-drag pans, like right-drag (the scroll wheel already zooms), as in most CAD tools.
+    this.#controls.mouseButtons = { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.PAN };
+    // Keep the browser's middle-click autoscroll from starting as well.
+    this.#renderer.domElement.addEventListener("mousedown", (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
     // Taking hold of the model hands the camera back to the user.
     this.#controls.addEventListener("start", () => {
       if (!this.#controls.autoRotate) return;
