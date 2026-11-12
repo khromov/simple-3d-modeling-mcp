@@ -67,8 +67,6 @@ export interface ExportResult {
 }
 
 export interface EngineCapabilities {
-  /** Manifold geometry backend available (fast booleans, coloured OFF output). */
-  manifold: boolean;
   /** Formats the engine can export directly via OpenSCAD. */
   exportFormats: string[];
 }

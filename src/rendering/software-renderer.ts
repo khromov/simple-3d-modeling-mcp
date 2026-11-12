@@ -1,6 +1,6 @@
 /**
- * Software mesh renderer used for previews when OpenSCAD itself cannot render
- * PNGs (the WASM build has no OpenGL).
+ * Software mesh renderer that draws every preview image from the model's mesh
+ * (the WebAssembly OpenSCAD build has no OpenGL).
  *
  * - OpenSCAD camera conventions (presets, gimbal and vector cameras)
  * - automatic framing, perspective or orthographic projection

@@ -149,7 +149,6 @@ export interface WasmEngineOptions {
 export class WasmEngine extends BaseEngine {
   readonly name = "wasm" as const;
   readonly capabilities: EngineCapabilities = {
-    manifold: true,
     // No amf: OpenSCAD removed AMF in its 2026.09 snapshots.
     exportFormats: ["stl", "off", "obj", "dxf", "svg", "csg"],
   };
