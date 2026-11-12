@@ -6,7 +6,7 @@ import type { CallToolResult, InitializeResult } from "tmcp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WasmEngine } from "../src/engine/wasm-engine.js";
 import { decodePng } from "../src/rendering/png.js";
-import { createServer, type AppServer } from "../src/server.js";
+import { createServer, enforceInlineLimit, MAX_INLINE_BYTES, type AppServer } from "../src/server.js";
 
 type Result = CallToolResult<undefined>;
 const contentOf = (r: Result) => r.content ?? [];
@@ -32,7 +32,12 @@ describe("MCP server", () => {
   let session: Session;
   let init: InitializeResult;
 
-  const call = (name: string, args: Record<string, unknown> = {}) => session.callTool(name, args);
+  /** The in-memory client resolves JSON-RPC errors to undefined; tool calls must never produce one. */
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const result = await session.callTool(name, args);
+    if (!result) throw new Error(`tools/call ${name} returned a JSON-RPC error instead of a result`);
+    return result;
+  };
 
   beforeAll(async () => {
     app = createServer({ engine: new WasmEngine(), outputDir: outDir, openUrl: (u) => opened.push(u) });
@@ -57,6 +62,9 @@ describe("MCP server", () => {
     expect(byName.export.annotations?.readOnlyHint).toBe(false);
     expect(byName.render.inputSchema.properties).toHaveProperty("file");
     expect(byName.get_version.inputSchema).toMatchObject({ type: "object", properties: {} });
+    // Input-side schemas, as the MCP SDK sent them: unknown keys are stripped, not rejected.
+    expect(byName.render.inputSchema).toMatchObject({ $schema: "http://json-schema.org/draft-07/schema#", type: "object" });
+    expect(byName.render.inputSchema).not.toHaveProperty("additionalProperties");
     expect(init.capabilities).toMatchObject({ tools: {}, resources: {} });
     expect(init.instructions).toMatch(/OpenSCAD/);
   });
@@ -147,6 +155,24 @@ describe("MCP server", () => {
     const r = await call("export", { code: "cube(1);", format: "stl", embed: true, title: "embedded" });
     const res = contentOf(r).find((c) => c.type === "resource") as { resource: { blob: string } };
     expect(Buffer.from(res.resource.blob, "base64").length).toBe(84 + 12 * 50);
+  });
+
+  it("writes but does not embed files over the inline limit", async () => {
+    // ~3.7 MB STL: big enough to overflow tmcp's base64 check if it were embedded.
+    const r = await call("export", { code: "sphere(10, $fn = 280);", format: "stl", embed: true, title: "big sphere" });
+    expect(r.isError).toBeFalsy();
+    expect(contentOf(r).some((c) => c.type === "resource")).toBe(false);
+    expect(textOf(r)).toContain(`(Not embedded: larger than ${MAX_INLINE_BYTES / 1024 / 1024} MB.)`);
+    expect(readFileSync(join(outDir, "big-sphere.stl")).length).toBeGreaterThan(MAX_INLINE_BYTES);
+  });
+
+  it("turns oversized inline images into isError results", () => {
+    const png = (bytes: number) => ({ type: "image" as const, data: Buffer.alloc(bytes).toString("base64"), mimeType: "image/png" });
+    const small = { content: [png(1024), { type: "text" as const, text: "ok" }] };
+    expect(enforceInlineLimit(small)).toBe(small);
+    const big = enforceInlineLimit({ content: [png(MAX_INLINE_BYTES + 3), { type: "text" as const, text: "summary" }] });
+    expect(big.isError).toBe(true);
+    expect(textOf(big)).toMatch(/image is 2\.0 MB, over the 2 MB limit[\s\S]*smaller width\/height/);
   });
 
   it("exports 2D designs as SVG and refuses mesh formats for them", async () => {

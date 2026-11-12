@@ -50,7 +50,6 @@
   "author": "mazzanfar",
   "license": "GPL-2.0",
   "dependencies": {
-    "@tmcp/adapter-zod": "^0.1.9",
     "@tmcp/transport-stdio": "^0.5.1",
     "openscad-wasm": "^0.0.4",
     "tmcp": "^1.20.1",

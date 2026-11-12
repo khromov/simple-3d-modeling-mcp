@@ -9,8 +9,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ZodJsonSchemaAdapter } from "@tmcp/adapter-zod";
 import { McpServer, type CallToolResult } from "tmcp";
+import { JsonSchemaAdapter } from "tmcp/adapter";
 import { z } from "zod";
 import { OPENSCAD_CHEATSHEET, SERVER_INSTRUCTIONS } from "./cheatsheet.js";
 import { NativeEngine } from "./engine/native-engine.js";
@@ -78,7 +78,13 @@ const MIME: Record<string, string> = {
   csg: "text/plain",
   pdf: "application/pdf",
 };
-const MAX_EMBED_BYTES = 5 * 1024 * 1024;
+/**
+ * Largest binary payload (image or embedded file) returned inline. tmcp checks
+ * every result's base64 with a regex that overflows V8's stack at about 3.2 MiB
+ * of data, which would turn the result into a JSON-RPC error.
+ */
+export const MAX_INLINE_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_MB = MAX_INLINE_BYTES / 1024 / 1024;
 
 const scalar = z.union([z.string(), z.number(), z.boolean()]);
 const paramsSchema = z
@@ -115,6 +121,38 @@ function image(png: Uint8Array): Content {
 
 function errorResult(message: string): ToolResult {
   return { content: [text(message)], isError: true };
+}
+
+type JsonSchema = Awaited<ReturnType<JsonSchemaAdapter<z.ZodType>["toJsonSchema"]>>;
+
+/**
+ * zod → JSON Schema for tool inputs. `io: "input"` describes what a tool
+ * accepts: objects get no `additionalProperties: false` (unknown keys are
+ * stripped, not rejected), matching the schemas the MCP SDK used to send.
+ */
+class ZodInputSchemaAdapter extends JsonSchemaAdapter<z.ZodType> {
+  override async toJsonSchema(schema: z.ZodType): Promise<JsonSchema> {
+    return z.toJSONSchema(schema, { target: "draft-7", io: "input" }) as JsonSchema;
+  }
+}
+
+/** Turns a result whose image or embedded file is too big to send inline into an isError result. */
+export function enforceInlineLimit(result: ToolResult): ToolResult {
+  for (const item of result.content ?? []) {
+    const base64 =
+      item.type === "image" ? item.data
+      : item.type === "resource" && "blob" in item.resource ? item.resource.blob
+      : undefined;
+    if (base64 === undefined) continue;
+    const bytes = Math.floor((base64.length * 3) / 4);
+    if (bytes <= MAX_INLINE_BYTES) continue;
+    const advice =
+      item.type === "image" ? "Use a smaller width/height (or fewer frames for render_turntable)." : "Export without embed and use the file on disk.";
+    return errorResult(
+      `The ${item.type === "image" ? "image" : "embedded file"} is ${(bytes / 1024 / 1024).toFixed(1)} MB, over the ${MAX_INLINE_MB} MB limit for inline results. ${advice}`,
+    );
+  }
+  return result;
 }
 
 function hintsFor(log: EngineLog): string[] {
@@ -175,7 +213,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
   const server: AppMcpServer = new McpServer(
     { name: "simple-3d-modeling-mcp", version: PACKAGE_VERSION },
     {
-      adapter: new ZodJsonSchemaAdapter(),
+      adapter: new ZodInputSchemaAdapter(),
       capabilities: { tools: { listChanged: true }, resources: { listChanged: true } },
       instructions: SERVER_INSTRUCTIONS,
     },
@@ -188,12 +226,12 @@ export function createServer(opts: CreateServerOptions): AppServer {
   let browserOpened = false;
   let openscadPngBroken = false;
 
-  /** Wraps a handler: user errors become isError results instead of protocol errors. */
+  /** Wraps a handler: user errors and oversized payloads become isError results instead of protocol errors. */
   const handle =
     <A extends unknown[]>(fn: (...args: A) => Promise<ToolResult>) =>
     async (...args: A): Promise<ToolResult> => {
       try {
-        return await fn(...args);
+        return enforceInlineLimit(await fn(...args));
       } catch (e) {
         if (e instanceof UserError) return errorResult(e.message);
         return errorResult(`Internal error: ${(e as Error).message ?? e}`);
@@ -367,7 +405,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
         overwrite: z.boolean().optional().describe("Replace an existing file (default false: a numbered name is used instead)"),
         params: paramsSchema,
         title: z.string().max(80).optional().describe("Model name, used for the default file name and 3MF metadata"),
-        embed: z.boolean().optional().describe("Also return the file contents inline (only for files up to 5 MB). Default false."),
+        embed: z.boolean().optional().describe(`Also return the file contents inline (only for files up to ${MAX_INLINE_MB} MB). Default false.`),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
@@ -430,10 +468,10 @@ export function createServer(opts: CreateServerOptions): AppServer {
         { type: "resource_link", uri: pathToFileURL(target).href, name: basename(target), mimeType: MIME[format], description: `Exported ${format.toUpperCase()} model` },
       ];
       if (args.embed) {
-        if (bytes.length <= MAX_EMBED_BYTES) {
+        if (bytes.length <= MAX_INLINE_BYTES) {
           content.push({ type: "resource", resource: { uri: pathToFileURL(target).href, mimeType: MIME[format], blob: Buffer.from(bytes).toString("base64") } });
         } else {
-          lines.push(`(Not embedded: larger than ${MAX_EMBED_BYTES / 1024 / 1024} MB.)`);
+          lines.push(`(Not embedded: larger than ${MAX_INLINE_MB} MB.)`);
         }
       }
       content.push(text(lines.join("\n\n")));
