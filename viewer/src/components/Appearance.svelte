@@ -37,7 +37,7 @@
       <Pipette size={15} strokeWidth={2.25} />
     </label>
   </div>
-  <p class="help">Used for parts without <code>color()</code>.</p>
+  <p class="help">Used for parts without a set <code>color()</code>.</p>
 </Section>
 
 <style>

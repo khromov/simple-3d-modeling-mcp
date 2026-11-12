@@ -39,13 +39,8 @@
   <span class="mark bl" aria-hidden="true"></span>
   <span class="mark br" aria-hidden="true"></span>
 
-  <!-- Top-right annotations, like the legend of a drawing: how to move, and which arrow is which axis. -->
+  <!-- Top-right annotations, like the legend of a drawing: which arrow is which axis, and how to move. -->
   <div class="legend">
-    <ul class="hint">
-      <li><kbd>Drag</kbd> rotate</li>
-      <li><kbd>Scroll</kbd> zoom</li>
-      <li><kbd>Right-drag</kbd> pan</li>
-    </ul>
     {#if mesh && grid}
       <ul class="axes" aria-label="Axis colours">
         {#each ["x", "y", "z"] as axis (axis)}
@@ -59,6 +54,11 @@
         {/each}
       </ul>
     {/if}
+    <ul class="hint">
+      <li><kbd>Drag</kbd> rotate</li>
+      <li><kbd>Scroll</kbd> zoom</li>
+      <li><kbd>Right-drag</kbd> pan</li>
+    </ul>
   </div>
 
   {#if mesh}

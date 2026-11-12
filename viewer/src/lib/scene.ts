@@ -140,7 +140,9 @@ export class ViewerScene {
       const w = container.clientWidth, h = container.clientHeight;
       if (!w || !h) return;
       this.#camera.aspect = w / h;
-      this.#camera.updateProjectionMatrix();
+      // Lens shift: the picture moves up to centre the model in the space above the
+      // toolbar, while the camera still orbits the model's centre.
+      this.#camera.setViewOffset(w, h, 0, Math.round(Math.min(36, h * 0.05)), w, h);
       this.#renderer.setSize(w, h);
     };
     const observer = new ResizeObserver(resize);
