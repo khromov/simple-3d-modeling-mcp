@@ -1,39 +1,105 @@
-export interface RenderResult {
-  success: boolean;
-  outputPath?: string;
-  outputBytes?: Uint8Array;
-  stdout: string;
-  stderr: string;
-  warnings: string[];
-  errors: string[];
+import type { Mesh } from "../geometry/mesh.js";
+import type { CameraSpec, Projection } from "../rendering/camera.js";
+
+export type ParamValue = string | number | boolean | ParamValue[];
+export type Params = Record<string, ParamValue>;
+
+/** A host file the model depends on (include/use/import), copied into the WASM filesystem. */
+export interface SourceFile {
+  /** Absolute host path. */
+  path: string;
+  data: Uint8Array;
 }
 
-export interface RenderPngOptions {
+/** OpenSCAD source ready to run: inline code or a file on disk, plus its dependencies. */
+export interface PreparedSource {
   code: string;
-  camera?: string;
-  imageSize?: [number, number];
-  params?: Record<string, string | number | boolean>;
+  /** Absolute host path of the main .scad file, when rendering from disk. */
+  path?: string;
+  /** Files referenced via include/use/import (resolved relative to the including file). */
+  deps: SourceFile[];
+  /** Content hash of code + path + deps; used as part of cache keys. */
+  hash: string;
+}
+
+export interface EngineLog {
+  errors: string[];
+  warnings: string[];
+  /** echo() output, without the "ECHO: " prefix. */
+  echo: string[];
+}
+
+export interface RunJob {
+  src: PreparedSource;
+  params?: Params;
+  /** Output file extension, e.g. "off", "stl", "png", "csg". */
+  outputExt: string;
+  /** Extra command-line arguments (camera, export format, …). */
+  args?: string[];
+  /** Additional files written next to the main file (used for the 2D preview). */
+  extraFiles?: { name: string; data: Uint8Array }[];
+  timeoutMs?: number;
+}
+
+export interface RunResult {
+  ok: boolean;
+  output?: Uint8Array;
+  log: EngineLog;
+  exitCode: number;
+  timedOut: boolean;
+  /** Raw stderr/stdout lines (for diagnostics). */
+  raw: string[];
+  timeMs: number;
+}
+
+export interface MeshResult {
+  ok: boolean;
+  mesh?: Mesh;
+  /** The design is 2D; `mesh` is a 1 mm extrusion of it for previewing. */
+  is2D: boolean;
+  log: EngineLog;
+  timeMs: number;
+}
+
+export interface ExportResult {
+  ok: boolean;
+  bytes?: Uint8Array;
+  log: EngineLog;
+}
+
+export interface PngRenderOptions {
+  camera: CameraSpec;
+  projection: Projection;
+  width: number;
+  height: number;
   colorscheme?: string;
+  params?: Params;
 }
 
-export interface ExportOptions {
-  code: string;
-  format?: string;
-  params?: Record<string, string | number | boolean>;
-  filename?: string;
-}
-
-export interface ValidateResult {
-  valid: boolean;
-  warnings: string[];
-  errors: string[];
+export interface EngineCapabilities {
+  /** Engine can render PNG previews itself (native OpenSCAD with OpenGL). */
+  png: boolean;
+  /** Manifold geometry backend available (fast booleans, coloured OFF output). */
+  manifold: boolean;
+  /** Formats the engine can export directly via OpenSCAD. */
+  exportFormats: string[];
 }
 
 export interface Engine {
-  readonly name: string;
-  readonly workDir: string;
-  renderPng(opts: RenderPngOptions): Promise<RenderResult>;
-  exportModel(opts: ExportOptions): Promise<RenderResult>;
-  validate(code: string): Promise<ValidateResult>;
+  readonly name: "wasm" | "native";
+  readonly capabilities: EngineCapabilities;
+  /** Low-level: run OpenSCAD once. */
+  run(job: RunJob): Promise<RunResult>;
+  /** Evaluate the model to a triangle mesh (with colours when available). */
+  computeMesh(src: PreparedSource, params?: Params): Promise<MeshResult>;
+  /** Export via OpenSCAD itself (formats not built from the mesh, e.g. amf, dxf, svg, csg). */
+  exportFormat(src: PreparedSource, format: string, params?: Params): Promise<ExportResult>;
+  /** Native-only: OpenSCAD-rendered PNG preview. */
+  renderPng?(src: PreparedSource, opts: PngRenderOptions): Promise<RunResult>;
+  /** Parse and evaluate without generating geometry. */
+  validate(src: PreparedSource, params?: Params): Promise<{ ok: boolean; log: EngineLog }>;
   version(): Promise<string>;
+  /** Extra details for get_version (paths, backend, …). */
+  describe(): Promise<Record<string, string>>;
+  dispose(): Promise<void>;
 }

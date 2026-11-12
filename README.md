@@ -2,33 +2,38 @@
 
 [![npm version](https://img.shields.io/npm/v/simple-3d-modeling-mcp)](https://www.npmjs.com/package/simple-3d-modeling-mcp)
 [![npm provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/simple-3d-modeling-mcp#provenance)
+[![CI](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mazzanfar/simple-3d-modeling-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/mazzanfar/simple-3d-modeling-mcp)
 [![CodeQL](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/mazzanfar/simple-3d-modeling-mcp/actions/workflows/codeql.yml)
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-green.svg)](https://opensource.org/licenses/GPL-2.0)
 
 [![Install with Claude Desktop](https://img.shields.io/badge/Install%20with-Claude%20Desktop-orange?style=for-the-badge&logo=claude)](https://github.com/mazzanfar/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb)
 
-An MCP (Model Context Protocol) server that lets anyone create, iterate on, and export 3D models through natural conversation with an LLM. Works with **any MCP-compatible client** — Claude, ChatGPT, Codex, and more. **Zero setup** — the OpenSCAD engine is bundled via WebAssembly. No system install needed.
+An MCP (Model Context Protocol) server that lets anyone create, iterate on, and export 3D models through natural conversation with an LLM. Works with **any MCP-compatible client** — Claude, ChatGPT, Codex, and more. **Zero setup** — OpenSCAD is bundled via WebAssembly, together with the BOSL2 library and fonts.
 
 ## Features
 
-- **Zero-setup** — `npm install simple-3d-modeling-mcp` and go. OpenSCAD runs via bundled WASM.
-- **Inline previews** — rendered PNG images appear directly in the chat
-- **Turntable animations** — 360 degree animated previews (APNG) for first-look at new models
-- **Multi-view grids** — front, right, top, and perspective in a single image
-- **Live browser viewer** — interactive 3D viewer with rotate/zoom/pan, auto-updates on each render
-- **Print-ready exports** — STL, 3MF, AMF, and more formats for 3D printing
-- **Native OpenSCAD support** — optionally install OpenSCAD for faster rendering and library support (BOSL2, MCAD)
+- **Zero setup** — `npx simple-3d-modeling-mcp` and go. No OpenSCAD install, no PATH configuration.
+- **Fast** — uses OpenSCAD's Manifold geometry backend; booleans that took over a minute with CGAL finish in well under a second. Repeat renders of the same code are cached.
+- **Previews the model can reason about** — every render returns the image *and* the model's size, bounds, volume, triangle count, `echo()` output and warnings, so the AI can check “is it really 80 mm wide?”.
+- **Real error messages** — OpenSCAD's own errors (with line numbers) plus hints, so the AI can fix its code.
+- **Multi-view grids** — labelled front / right / top (orthographic) + perspective views in one image.
+- **Turntable animations** — 360° animated previews for the user.
+- **Colours** — `color()` shows up in previews, the viewer and 3MF exports.
+- **BOSL2 and `text()`** — `include <BOSL2/std.scad>` and `text("…")` work out of the box.
+- **Live browser viewer** — rotate/zoom/pan, model history, dimensions, STL/3MF download, open in your slicer. Runs locally, works offline.
+- **Real files** — export STL, 3MF, OBJ, OFF, AMF (and SVG/DXF for 2D designs) to a folder you choose; save and render `.scad` files with relative `include`/`use`.
+- **Native OpenSCAD when it helps** — a Manifold-capable OpenSCAD install (2024+/nightly) is used automatically for OpenGL-quality previews and your own libraries.
 
 ## Quick Start
 
-This server uses the standard [Model Context Protocol](https://modelcontextprotocol.io) over **stdio**, so it works with any MCP-compatible client. Pick yours below:
+This server speaks the standard [Model Context Protocol](https://modelcontextprotocol.io) over **stdio**, so it works with any MCP-compatible client.
 
 ### Claude Desktop
 
-**Easiest:** Download [simple-3d-modeling.mcpb](https://github.com/mazzanfar/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb) and double-click to install.
+**Easiest:** download [simple-3d-modeling.mcpb](https://github.com/mazzanfar/simple-3d-modeling-mcp/releases/latest/download/simple-3d-modeling.mcpb) and double-click it. The extension settings let you pick the export folder, turn off the automatic browser viewer, or point at an installed OpenSCAD.
 
-Or manually add to your `claude_desktop_config.json`:
+Or add it to `claude_desktop_config.json` manually:
 
 ```json
 {
@@ -62,42 +67,83 @@ codex mcp add simple-3d-modeling -- npx -y simple-3d-modeling-mcp
 
 ### Other MCP Clients (Cursor, Windsurf, etc.)
 
-Any client that supports MCP over stdio can use this server. The command to run is:
+Any client that supports MCP over stdio can use this server:
 
 ```bash
 npx -y simple-3d-modeling-mcp
 ```
 
-Consult your client's documentation for how to register an MCP server with that command.
-
----
-
-That's it. No OpenSCAD install. No PATH configuration.
+Requires Node.js 22, 24 or 26 (LTS).
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `render` | Render code to a PNG preview image (also pushes to live viewer) |
-| `render_turntable` | 360 degree turntable animation (APNG) |
-| `render_multiview` | Multi-view grid (front, right, top, perspective) |
-| `export` | Export to STL, 3MF, AMF, OFF, DXF, SVG |
-| `validate` | Syntax-check without full render |
-| `open_viewer` | Open interactive 3D viewer in browser |
-| `cheatsheet` | OpenSCAD language quick-reference |
-| `list_libraries` | Discover installed libraries (native OpenSCAD only) |
-| `get_version` | Check engine info (WASM or native) |
-| `read_scad_file` | Read an existing .scad file |
+| `render` | Render code or a `.scad` file to a PNG preview, with size/bounds/volume, `echo()` output and warnings. Views: `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, rotation angles, or an OpenSCAD camera string. |
+| `render_multiview` | Labelled grid of views (default: front, right, top in orthographic + perspective) |
+| `render_turntable` | 360° turntable animation (animated PNG) |
+| `export` | Export to STL, 3MF (with colours), OBJ, OFF, AMF, SVG, DXF or CSG on disk. Never overwrites unless asked. |
+| `validate` | Fast check for syntax errors, failed `assert()`s and unknown variables |
+| `open_viewer` | Open the interactive 3D viewer in the browser |
+| `save_scad_file` | Save OpenSCAD source to a `.scad` file |
+| `read_scad_file` | Read a `.scad` file |
+| `list_libraries` | Bundled libraries (BOSL2) and, for native OpenSCAD, installed ones |
+| `cheatsheet` | OpenSCAD + BOSL2 quick reference (also available as the `openscad://cheatsheet` resource) |
+| `get_version` | Engine, OpenSCAD version, backend and settings |
+
+All model tools accept either `code` or `file` (an absolute path to a `.scad` file; relative `include`/`use`/`import` paths resolve from its folder), plus `params` for variable overrides (like OpenSCAD's `-D`), e.g. `{"width": 40, "size": [10, 20, 5]}`.
+
+A render response looks like this (plus the image):
+
+```text
+Size: 80 × 45 × 62.5 mm (X × Y × Z)
+Bounds: X -40 … 40 · Y -22.5 … 22.5 · Z 0 … 62.5
+Volume: 41.27 cm³ · Surface: 210.33 cm² · 1,536 triangles
+
+Geometry evaluated in 0.31s.
+
+ECHO output:
+"lip height", 12
+
+Interactive viewer: http://localhost:51386
+```
 
 ## Live Browser Viewer
 
-On first render, an interactive 3D viewer automatically opens in your browser:
+On the first render an interactive viewer opens in your browser (set `OPENSCAD_AUTO_OPEN_VIEWER=false` to only print its URL):
 
-- **Live updates** — model refreshes automatically on every render
-- **Model history** — sidebar shows every version, click to revisit
-- **Dimensions** — bounding box and volume computed from geometry
-- **Export** — download STL directly from the viewer
-- **Controls** — rotate (drag), zoom (scroll), pan (right-drag), wireframe, auto-rotate, grid
+- **Live updates** — refreshes on every render; your camera position is kept while you iterate
+- **History** — every version, named after the render's `title`
+- **Dimensions** — size, true volume and triangle count
+- **Colours** — `color()` is shown; a colour picker sets the colour of uncoloured parts
+- **Export** — download STL or 3MF, or open the model in Bambu Studio, OrcaSlicer, PrusaSlicer, Cura or Creality Print
+- **Controls** — rotate (drag), zoom (scroll), pan (right-drag), edges, wireframe, auto-rotate, grid, light/dark theme
+
+The viewer listens on `127.0.0.1` only and rejects requests from other web pages (Host and Origin checks).
+
+## Exports
+
+`export` writes to the `path` you give (absolute, or `~/…`), or to the export folder (default: `~/Downloads`, configurable). If a file already exists, a numbered name is used unless `overwrite: true`. The format can come from the path's extension (`~/Desktop/stand.3mf`). Exports reuse the geometry from the last render of the same code, so they are near-instant.
+
+## Engines
+
+| Engine | When it's used | Notes |
+|--------|----------------|-------|
+| **WASM** (bundled) | Default | OpenSCAD 2025 with Manifold, BOSL2 and DejaVu fonts (Liberation Sans maps to DejaVu Sans). Previews come from the built-in renderer. Each job runs in a worker thread with a timeout. |
+| **Native** | `OPENSCAD_PATH` is set, or a Manifold-capable OpenSCAD is found on the PATH / in the usual install locations | OpenGL previews from OpenSCAD itself, your installed libraries, plus the bundled BOSL2 if you don't have it. An older OpenSCAD (e.g. 2021.01) is *not* picked automatically because the bundled engine is much faster — set `OPENSCAD_PATH` to use it anyway. |
+
+`get_version` shows which engine is active and why.
+
+## Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENSCAD_ENGINE` | `auto`, `wasm` or `native` | `auto` |
+| `OPENSCAD_PATH` | Explicit path to an OpenSCAD binary (falls back to WASM if it doesn't work) | auto-detected |
+| `OPENSCAD_OUTPUT_DIR` | Folder for exports and relative `save_scad_file` paths | `~/Downloads` |
+| `OPENSCAD_AUTO_OPEN_VIEWER` | Open the browser viewer on the first render | `true` |
+| `OPENSCAD_TIMEOUT` | Seconds before a single OpenSCAD run is stopped | `120` |
+| `OPENSCAD_WORK_DIR` | Temp folder for native OpenSCAD runs (cleaned up after each run) | OS temp dir |
 
 ## Compatibility Notes
 
@@ -109,42 +155,35 @@ On first render, an interactive 3D viewer automatically opens in your browser:
 | OpenAI Codex CLI | Depends on terminal | Yes |
 | Cursor / Windsurf | Yes | Yes |
 
-> **Tip:** Even if a client doesn't render inline images, the live browser viewer (`open_viewer`) works everywhere — it opens a standalone browser tab with full 3D interaction.
-
-## Native OpenSCAD (Optional)
-
-For faster rendering and library support, install [OpenSCAD](https://openscad.org/downloads.html). The server auto-detects it on your PATH and uses it when available.
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENSCAD_PATH` | Explicit path to native OpenSCAD binary | auto-detected |
-| `OPENSCAD_WORK_DIR` | Directory for temporary render files | OS temp dir |
+> **Tip:** even if a client doesn't render inline images, the AI still gets the dimensions, and the browser viewer (`open_viewer`) works everywhere.
 
 ## Example Conversation
 
 > **You:** Make me a phone stand that holds the phone at 60 degrees
 >
-> **LLM:** *calls render* — Here's a phone stand with a 60 degree viewing angle. The base is 80mm wide with a 3mm lip. The interactive 3D viewer is open in your browser too. Want me to adjust anything?
+> **AI:** *calls render* — Here's a phone stand with a 60° viewing angle. It's 80 × 70 × 62 mm with a 12 mm lip. The 3D viewer is open in your browser too. Want me to adjust anything?
 >
 > **You:** Make it thicker and add a cable slot in the back
 >
-> **LLM:** *modifies code, calls render* — Updated! Wall thickness is now 4mm with a 12mm cable slot. Check the viewer to spin it around.
+> **AI:** *modifies code, calls render_multiview* — Updated: walls are now 4 mm and there's a 12 mm cable slot, visible in the back view.
 >
-> **You:** Perfect! Export it for my 3D printer
+> **You:** Perfect! Export it for my Bambu printer
 >
-> **LLM:** *calls export(format="3mf")* — Exported to ~/Desktop/phone-stand.3mf (42 KB). Ready to slice and print!
+> **AI:** *calls export(format="3mf", title="phone stand")* — Saved to ~/Downloads/phone-stand.3mf (42 KB). You can also open it in Bambu Studio from the viewer.
 
 ## Development
 
 ```bash
 npm install
-npm run build        # compile TypeScript
-npm test             # run tests
+npm run build        # fetches bundled assets (fonts, BOSL2, viewer files) and compiles TypeScript
+npm test             # unit, engine, renderer, viewer and MCP-level tests
+npm run typecheck    # sources and tests
 npm run dev          # watch mode
+npm run build:mcpb   # Claude Desktop extension bundle
 ```
+
+`npm run assets` populates `assets/` (git-ignored): DejaVu fonts from the `dejavu-fonts-ttf` package, the three.js files the viewer needs, and BOSL2 downloaded from GitHub at a pinned tag and verified against a SHA-256 checksum.
 
 ## License
 
-GPL-2.0 (required by the openscad-wasm dependency)
+GPL-2.0 (required by the openscad-wasm dependency). Bundled third-party assets keep their own licenses, included alongside them: BOSL2 (BSD-2-Clause), DejaVu fonts (Bitstream Vera / public domain), three.js (MIT).

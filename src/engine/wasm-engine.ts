@@ -1,247 +1,254 @@
-import { randomUUID } from "node:crypto";
-import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { createOpenSCAD } from "openscad-wasm";
-import type {
-  Engine,
-  RenderPngOptions,
-  RenderResult,
-  ExportOptions,
-  ValidateResult,
-} from "./types.js";
-
 /**
- * Creates a fresh OpenSCAD WASM instance with output capture.
+ * OpenSCAD compiled to WebAssembly (bundled, zero setup).
  *
- * Emscripten's callMain() can only be invoked once per instance — a second
- * call will crash. Therefore we spin up a new instance for every operation.
- * The WASM binary is cached internally by the JS engine / V8, so subsequent
- * instantiations are fast (~50-100 ms).
+ * Every job runs in a worker thread with a fresh OpenSCAD instance
+ * (Emscripten's callMain can only run once per instance). Jobs use the
+ * Manifold backend, which is orders of magnitude faster than CGAL.
  */
-async function createInstance(stdoutLines: string[], stderrLines: string[]) {
-  const wrapper = await createOpenSCAD({
-    noInitialRun: true,
-    print: (text: string) => stdoutLines.push(text),
-    printErr: (text: string) => stderrLines.push(text),
-  });
-  return wrapper.getInstance();
+
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { posix, win32 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
+import { FONTS_DIR, LIBRARIES_DIR, bundledLibraries, bundledLibraryVersion } from "../paths.js";
+import { BaseEngine, timeoutMessage } from "./base-engine.js";
+import { parseLog, rewritePaths } from "./output.js";
+import { paramArgs } from "./params.js";
+import type { EngineCapabilities, RunJob, RunResult } from "./types.js";
+import type { WorkerInit, WorkerJob, WorkerReply } from "./wasm-worker.js";
+
+const MAIN_VFS_PATH = "/work/input.scad";
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/** Maps a host path to a path inside the WASM filesystem (POSIX). */
+export function toVfsPath(hostPath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== "win32") return hostPath;
+  const parsed = win32.parse(hostPath);
+  const drive = parsed.root.replace(/[:\\/]/g, "") || "root";
+  const rest = hostPath.slice(parsed.root.length).split("\\").join("/");
+  return `/${drive}/${rest}`;
 }
 
-function parseOutput(lines: string[]): { warnings: string[]; errors: string[] } {
-  const warnings: string[] = [];
-  const errors: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (/warning/i.test(trimmed)) {
-      warnings.push(trimmed);
-    } else if (/error/i.test(trimmed)) {
-      errors.push(trimmed);
-    }
-  }
-  return { warnings, errors };
+class TimeoutError extends Error {}
+
+interface Task {
+  job: WorkerJob;
+  timeoutMs: number;
+  resolve: (r: WorkerReply) => void;
+  reject: (e: Error) => void;
+  timer?: NodeJS.Timeout;
 }
 
-function buildParamArgs(
-  params: Record<string, string | number | boolean> | undefined,
-): string[] {
-  if (!params) return [];
-  const args: string[] = [];
-  for (const [key, value] of Object.entries(params)) {
-    if (typeof value === "string") {
-      args.push("-D", `${key}="${value}"`);
-    } else {
-      args.push("-D", `${key}=${value}`);
-    }
-  }
-  return args;
+interface Slot {
+  worker?: Worker;
+  task?: Task;
 }
 
-export class WasmEngine implements Engine {
-  readonly name = "wasm";
-  readonly workDir: string;
+/** Fixed-size pool of OpenSCAD worker threads with per-job timeouts. */
+class WorkerPool {
+  private readonly slots: Slot[];
+  private readonly queue: Task[] = [];
+  private nextId = 1;
+  private disposed = false;
 
-  constructor(workDir?: string) {
-    this.workDir = workDir ?? join(tmpdir(), "simple-3d-modeling-mcp-wasm");
+  constructor(size: number, private readonly init: WorkerInit, private readonly url: URL) {
+    this.slots = Array.from({ length: Math.max(1, size) }, () => ({}));
   }
 
-  async renderPng(opts: RenderPngOptions): Promise<RenderResult> {
-    const id = randomUUID();
-    const inputPath = `/${id}.scad`;
-    const outputPath = `/${id}.png`;
+  run(job: Omit<WorkerJob, "id">, timeoutMs: number): Promise<WorkerReply> {
+    if (this.disposed) return Promise.reject(new Error("Engine disposed"));
+    return new Promise((resolve, reject) => {
+      this.queue.push({ job: { ...job, id: this.nextId++ }, timeoutMs, resolve, reject });
+      this.pump();
+    });
+  }
 
-    const stdoutLines: string[] = [];
-    const stderrLines: string[] = [];
-
-    try {
-      const instance = await createInstance(stdoutLines, stderrLines);
-
-      instance.FS.writeFile(inputPath, opts.code);
-
-      const args = [inputPath, "-o", outputPath];
-
-      if (opts.imageSize) {
-        args.push(`--imgsize=${opts.imageSize[0]},${opts.imageSize[1]}`);
-      }
-      if (opts.camera) {
-        args.push(`--camera=${opts.camera}`);
-      }
-      if (opts.colorscheme) {
-        args.push(`--colorscheme=${opts.colorscheme}`);
-      }
-      args.push(...buildParamArgs(opts.params));
-
-      const exitCode = instance.callMain(args);
-
-      const stderr = stderrLines.join("\n");
-      const stdout = stdoutLines.join("\n");
-      const { warnings, errors } = parseOutput(stderrLines);
-
-      let outputBytes: Uint8Array | undefined;
-      let diskPath: string | undefined;
-
-      try {
-        const bytes = instance.FS.readFile(outputPath, {
-          encoding: "binary",
-        });
-        outputBytes = bytes;
-        await mkdir(this.workDir, { recursive: true });
-        diskPath = join(this.workDir, `${id}.png`);
-        await writeFile(diskPath, bytes);
-      } catch {
-        // Output file may not exist if render failed
-      }
-
-      return {
-        success: exitCode === 0 && errors.length === 0,
-        outputPath: diskPath,
-        outputBytes,
-        stdout,
-        stderr,
-        warnings,
-        errors,
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        stdout: stdoutLines.join("\n"),
-        stderr: stderrLines.join("\n"),
-        warnings: [],
-        errors: [message],
-      };
+  private pump(): void {
+    for (const slot of this.slots) {
+      if (slot.task) continue;
+      const task = this.queue.shift();
+      if (!task) return;
+      this.start(slot, task);
     }
   }
 
-  async exportModel(opts: ExportOptions): Promise<RenderResult> {
-    const id = randomUUID();
-    const format = opts.format ?? "stl";
-    const inputPath = `/${id}.scad`;
-    const outputPath = `/${id}.${format}`;
-
-    const stdoutLines: string[] = [];
-    const stderrLines: string[] = [];
-
-    try {
-      const instance = await createInstance(stdoutLines, stderrLines);
-
-      instance.FS.writeFile(inputPath, opts.code);
-
-      const args = [inputPath, "-o", outputPath];
-      args.push(...buildParamArgs(opts.params));
-
-      const exitCode = instance.callMain(args);
-
-      const stderr = stderrLines.join("\n");
-      const stdout = stdoutLines.join("\n");
-      const { warnings, errors } = parseOutput(stderrLines);
-
-      let outputBytes: Uint8Array | undefined;
-      let diskPath: string | undefined;
-
-      try {
-        const bytes = instance.FS.readFile(outputPath, {
-          encoding: "binary",
-        });
-        outputBytes = bytes;
-        await mkdir(this.workDir, { recursive: true });
-        const filename = opts.filename ?? `${id}.${format}`;
-        diskPath = join(this.workDir, filename);
-        await writeFile(diskPath, bytes);
-      } catch {
-        // Output may not exist on failure
+  private spawn(slot: Slot): Worker {
+    const worker = new Worker(this.url, { workerData: this.init });
+    worker.on("message", (reply: WorkerReply) => {
+      if (slot.worker === worker && slot.task?.job.id === reply.id) {
+        const task = slot.task;
+        this.settle(slot, () => task.resolve(reply));
       }
-
-      return {
-        success: exitCode === 0 && errors.length === 0,
-        outputPath: diskPath,
-        outputBytes,
-        stdout,
-        stderr,
-        warnings,
-        errors,
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        stdout: stdoutLines.join("\n"),
-        stderr: stderrLines.join("\n"),
-        warnings: [],
-        errors: [message],
-      };
-    }
+    });
+    const onFailure = (err: Error) => {
+      if (slot.worker !== worker) return;
+      slot.worker = undefined;
+      void worker.terminate();
+      const task = slot.task;
+      if (task) this.settle(slot, () => task.reject(err));
+    };
+    worker.on("error", onFailure);
+    worker.on("exit", (code) => onFailure(new Error(`OpenSCAD worker exited unexpectedly (code ${code})`)));
+    slot.worker = worker;
+    return worker;
   }
 
-  async validate(code: string): Promise<ValidateResult> {
-    const id = randomUUID();
-    const inputPath = `/${id}.scad`;
-    const outputPath = `/${id}.csg`;
-
-    const stderrLines: string[] = [];
-
-    try {
-      const instance = await createInstance([], stderrLines);
-
-      instance.FS.writeFile(inputPath, code);
-
-      const exitCode = instance.callMain([inputPath, "-o", outputPath]);
-
-      const { warnings, errors } = parseOutput(stderrLines);
-
-      return {
-        valid: exitCode === 0 && errors.length === 0,
-        warnings,
-        errors,
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        valid: false,
-        warnings: [],
-        errors: [message],
-      };
-    }
+  private start(slot: Slot, task: Task): void {
+    const worker = slot.worker ?? this.spawn(slot);
+    slot.task = task;
+    worker.ref();
+    task.timer = setTimeout(() => {
+      if (slot.task !== task) return;
+      const w = slot.worker;
+      slot.worker = undefined;
+      void w?.terminate();
+      this.settle(slot, () => task.reject(new TimeoutError()));
+    }, task.timeoutMs);
+    worker.postMessage(task.job);
   }
 
-  async version(): Promise<string> {
-    const stderrLines: string[] = [];
-    const stdoutLines: string[] = [];
+  private settle(slot: Slot, fn: () => void): void {
+    const task = slot.task;
+    if (!task) return;
+    clearTimeout(task.timer);
+    slot.task = undefined;
+    slot.worker?.unref();
+    fn();
+    this.pump();
+  }
 
-    try {
-      const instance = await createInstance(stdoutLines, stderrLines);
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    for (const t of this.queue.splice(0)) t.reject(new Error("Engine disposed"));
+    await Promise.all(
+      this.slots.map(async (slot) => {
+        const w = slot.worker;
+        slot.worker = undefined;
+        if (slot.task) this.settle(slot, () => slot.task?.reject(new Error("Engine disposed")));
+        if (w) await w.terminate();
+      }),
+    );
+  }
+}
 
-      instance.callMain(["--version"]);
+function workerUrl(): URL {
+  const js = new URL("./wasm-worker.js", import.meta.url);
+  if (existsSync(fileURLToPath(js))) return js;
+  // Running from TypeScript sources (tests): Node strips the types itself.
+  return new URL("./wasm-worker.ts", import.meta.url);
+}
 
-      const allOutput = [...stdoutLines, ...stderrLines].join("\n");
-      const match =
-        allOutput.match(/OpenSCAD\s+version\s+[\d.]+/i) ??
-        allOutput.match(/[\d]+\.[\d]+\.[\d]+/);
-      return match ? match[0] : allOutput.trim() || "unknown";
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return `error: ${message}`;
+export interface WasmEngineOptions {
+  /** Per-job timeout (default 120 s). */
+  timeoutMs?: number;
+  /** Number of worker threads (default 2). */
+  workers?: number;
+}
+
+export class WasmEngine extends BaseEngine {
+  readonly name = "wasm" as const;
+  readonly capabilities: EngineCapabilities = {
+    png: false,
+    manifold: true,
+    exportFormats: ["stl", "off", "obj", "amf", "dxf", "svg", "csg"],
+  };
+  readonly timeoutMs: number;
+  private readonly pool: WorkerPool;
+  private readonly libraries: string[];
+  private versionCache?: Promise<string>;
+
+  constructor(opts: WasmEngineOptions = {}) {
+    super();
+    this.timeoutMs = opts.timeoutMs ?? 120_000;
+    const require = createRequire(import.meta.url);
+    const init: WorkerInit = {
+      openscadUrl: pathToFileURL(require.resolve("openscad-wasm")).href,
+      fontsDir: FONTS_DIR,
+      librariesDir: LIBRARIES_DIR,
+    };
+    this.pool = new WorkerPool(opts.workers ?? 2, init, workerUrl());
+    this.libraries = bundledLibraries();
+  }
+
+  async run(job: RunJob): Promise<RunResult> {
+    const started = performance.now();
+    const { src } = job;
+    const mainPath = src.path ? toVfsPath(src.path) : MAIN_VFS_PATH;
+    const workDir = posix.dirname(mainPath);
+    const outputPath = `/out/result.${job.outputExt}`;
+
+    const files: WorkerJob["files"] = [{ path: mainPath, data: encoder.encode(src.code) }];
+    let corpus = src.code;
+    for (const dep of src.deps) {
+      files.push({ path: toVfsPath(dep.path), data: dep.data });
+      if (dep.path.toLowerCase().endsWith(".scad")) corpus += "\n" + decoder.decode(dep.data);
     }
+    for (const extra of job.extraFiles ?? []) files.push({ path: posix.join(workDir, extra.name), data: extra.data });
+
+    const args = [mainPath, ...(job.args ?? []), ...paramArgs(job.params), "-o", outputPath];
+    const timeoutMs = job.timeoutMs ?? this.timeoutMs;
+
+    let reply: WorkerReply;
+    try {
+      reply = await this.pool.run(
+        {
+          args,
+          files,
+          outputPath,
+          fonts: /text|font/i.test(corpus),
+          libraries: this.libraries.filter((name) => corpus.includes(name)),
+        },
+        timeoutMs,
+      );
+    } catch (e) {
+      const timedOut = e instanceof TimeoutError;
+      return {
+        ok: false,
+        log: { errors: [timedOut ? timeoutMessage(timeoutMs) : `ERROR: ${(e as Error).message}`], warnings: [], echo: [] },
+        exitCode: -1,
+        timedOut,
+        raw: [],
+        timeMs: performance.now() - started,
+      };
+    }
+
+    let log = parseLog(reply.lines);
+    if (!src.path) log = rewritePaths(log, [[MAIN_VFS_PATH, "input.scad"]]);
+    if (reply.crash) log.errors.push(`ERROR: OpenSCAD crashed: ${reply.crash}`);
+    if (reply.exitCode !== 0 && log.errors.length === 0) {
+      log.errors.push(`ERROR: OpenSCAD exited with code ${reply.exitCode}`);
+    }
+    const ok = reply.exitCode === 0 && log.errors.length === 0 && reply.output !== undefined;
+    return { ok, output: reply.output, log, exitCode: reply.exitCode, timedOut: false, raw: reply.lines, timeMs: performance.now() - started };
+  }
+
+  version(): Promise<string> {
+    this.versionCache ??= this.pool
+      .run({ args: ["--version"], files: [], fonts: false, libraries: [] }, 30_000)
+      .then((r) => {
+        const all = r.lines.join("\n");
+        const m = all.match(/OpenSCAD version\s+\S+/i) ?? all.match(/\d{4}\.\d{2}\.\d{2}|\d+\.\d+(\.\d+)?/);
+        return m ? m[0] : all.trim() || "unknown";
+      })
+      .catch((e) => `unknown (${(e as Error).message})`);
+    return this.versionCache;
+  }
+
+  async describe(): Promise<Record<string, string>> {
+    return {
+      Engine: "WASM (bundled OpenSCAD, no install needed)",
+      OpenSCAD: await this.version(),
+      Backend: "Manifold",
+      "PNG previews": "built-in software renderer",
+      "Bundled libraries": this.libraries.map((l) => `${l} ${bundledLibraryVersion(l) ?? ""}`.trim()).join(", ") || "none",
+      Fonts: "DejaVu Sans / Serif / Sans Mono (Liberation Sans → DejaVu Sans)",
+      Timeout: `${Math.round(this.timeoutMs / 1000)}s per job`,
+    };
+  }
+
+  async dispose(): Promise<void> {
+    await this.pool.dispose();
   }
 }

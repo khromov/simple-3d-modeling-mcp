@@ -5,6 +5,9 @@ dist/
 *.js.map
 *.d.ts.map
 !src/**
+!scripts/**
 .DS_Store
 *.mcpb
 mcpb-build/
+assets/
+coverage/

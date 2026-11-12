@@ -1,102 +1,128 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { prepareSource } from "../../src/engine/source.js";
 import { WasmEngine } from "../../src/engine/wasm-engine.js";
+import { computeStats } from "../../src/geometry/stats.js";
+
+const src = (code: string) => prepareSource({ code });
 
 describe("WasmEngine", () => {
   let engine: WasmEngine;
+  const dir = mkdtempSync(join(tmpdir(), "s3d-wasm-"));
 
   beforeAll(() => {
     engine = new WasmEngine();
   });
-
-  it("should export a cube to STL", async () => {
-    const result = await engine.exportModel({
-      code: "cube([10, 10, 10]);",
-      format: "stl",
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.outputBytes).toBeDefined();
-    expect(result.outputBytes!.length).toBeGreaterThan(0);
-    // STL binary starts with an 80-byte header, or ASCII starts with "solid"
-    const header = new TextDecoder().decode(result.outputBytes!.slice(0, 5));
-    const isBinaryOrAsciiStl =
-      result.outputBytes!.length > 80 || header === "solid";
-    expect(isBinaryOrAsciiStl).toBe(true);
-    expect(result.outputPath).toBeDefined();
+  afterAll(async () => {
+    await engine.dispose();
+    rmSync(dir, { recursive: true, force: true });
   });
 
-  it("should attempt PNG render (may not be supported in WASM build)", async () => {
-    const result = await engine.renderPng({
-      code: "cube([10, 10, 10]);",
-      imageSize: [256, 256],
-    });
+  it("evaluates a model to a mesh with the Manifold backend", async () => {
+    const r = await engine.computeMesh(src("cube([10, 20, 30]);"));
+    expect(r.ok).toBe(true);
+    const s = computeStats(r.mesh!);
+    expect(s.size).toEqual([10, 20, 30]);
+    expect(s.volume).toBeCloseTo(6000, 1);
+  });
 
-    // The WASM build of OpenSCAD does not include the OpenGL renderer,
-    // so PNG export is expected to fail. We verify graceful failure.
-    if (result.success) {
-      // If it does succeed (future WASM builds), verify PNG magic bytes
-      expect(result.outputBytes).toBeDefined();
-      expect(result.outputBytes![0]).toBe(0x89);
-      expect(result.outputBytes![1]).toBe(0x50);
-    } else {
-      // Graceful failure — no crash, returns a proper result
-      expect(result.success).toBe(false);
+  it("keeps color() information", async () => {
+    const r = await engine.computeMesh(src('color("red") cube(5); translate([10,0,0]) cube(5);'));
+    expect(r.ok).toBe(true);
+    expect(computeStats(r.mesh!).colors).toEqual(["#ff0000"]);
+  });
+
+  it("applies parameter overrides", async () => {
+    const r = await engine.computeMesh(src("size = 10; label = \"x\"; cube(size);"), { size: 20, label: "y" });
+    expect(computeStats(r.mesh!).size).toEqual([20, 20, 20]);
+  });
+
+  it("returns echo output and warnings", async () => {
+    const r = await engine.computeMesh(src('echo("w", 42); cube(w);'));
+    expect(r.ok).toBe(true);
+    expect(r.log.echo).toEqual(['"w", 42']);
+    expect(r.log.warnings.join("\n")).toMatch(/unknown variable "w"/);
+  });
+
+  it("reports parser errors with a readable file name", async () => {
+    const r = await engine.computeMesh(src("cube([10, 10, 10);"));
+    expect(r.ok).toBe(false);
+    expect(r.log.errors[0]).toMatch(/Parser error: syntax error in file input\.scad, line 1/);
+  });
+
+  it("reports empty geometry as an error", async () => {
+    const r = await engine.computeMesh(src("difference() { cube(5); cube(10); }"));
+    expect(r.ok).toBe(false);
+    expect(r.log.errors).toContain("Current top level object is empty.");
+  });
+
+  it("supports text() with bundled fonts", async () => {
+    const r = await engine.computeMesh(src('linear_extrude(2) text("Hi", size = 10, font = "Liberation Sans:style=Bold");'));
+    expect(r.ok, r.log.errors.join("\n")).toBe(true);
+    expect(computeStats(r.mesh!).size[0]).toBeGreaterThan(5);
+  });
+
+  it("supports the bundled BOSL2 library", async () => {
+    const r = await engine.computeMesh(src("include <BOSL2/std.scad>\ncuboid([30, 20, 10], rounding = 2, $fn = 16);"));
+    expect(r.ok, r.log.errors.join("\n")).toBe(true);
+    const s = computeStats(r.mesh!);
+    expect(s.size.map(Math.round)).toEqual([30, 20, 10]);
+    expect(s.volume).toBeLessThan(6000); // rounded edges remove material
+  });
+
+  it("previews 2D designs as a thin extrusion", async () => {
+    const r = await engine.computeMesh(src("square([40, 20]);"));
+    expect(r.ok).toBe(true);
+    expect(r.is2D).toBe(true);
+    expect(computeStats(r.mesh!).size).toEqual([40, 20, 1]);
+  });
+
+  it("resolves relative include/use/import for files on disk", async () => {
+    mkdirSync(join(dir, "parts"), { recursive: true });
+    writeFileSync(join(dir, "parts", "lib.scad"), "module part(s) { cube(s); }\n");
+    writeFileSync(join(dir, "main.scad"), "use <parts/lib.scad>\npart(7);\n");
+    const r = await engine.computeMesh(prepareSource({ file: join(dir, "main.scad") }));
+    expect(r.ok, r.log.errors.join("\n")).toBe(true);
+    expect(computeStats(r.mesh!).size).toEqual([7, 7, 7]);
+  });
+
+  it("exports formats OpenSCAD writes directly", async () => {
+    const svg = await engine.exportFormat(src("square([10, 5]);"), "svg");
+    expect(svg.ok).toBe(true);
+    expect(new TextDecoder().decode(svg.bytes)).toContain("<svg");
+    const amf = await engine.exportFormat(src("cube(3);"), "amf");
+    expect(amf.ok).toBe(true);
+    await expect(engine.exportFormat(src("cube(3);"), "pdf")).rejects.toThrow(/cannot export "pdf"/);
+  });
+
+  it("validates code, including assert()", async () => {
+    expect((await engine.validate(src("cube(1);"))).ok).toBe(true);
+    const bad = await engine.validate(src('assert(false, "nope"); cube(1);'));
+    expect(bad.ok).toBe(false);
+    expect(bad.log.errors[0]).toMatch(/Assertion .* failed: "nope"/);
+  });
+
+  it("runs jobs concurrently", async () => {
+    const results = await Promise.all([1, 2, 3, 4].map((n) => engine.computeMesh(src(`cube(${n});`))));
+    expect(results.map((r) => computeStats(r.mesh!).size[0])).toEqual([1, 2, 3, 4]);
+  });
+
+  it("reports the OpenSCAD version", async () => {
+    expect(await engine.version()).toMatch(/\d{4}\.\d{2}\.\d{2}/);
+  });
+
+  it("enforces a timeout and recovers afterwards", async () => {
+    const fast = new WasmEngine({ timeoutMs: 1000, workers: 1 });
+    try {
+      const slow = await fast.computeMesh(src("function f(n, a = 0) = n == 0 ? a : f(n - 1, a + 1); echo(f(1e9)); cube(1);"));
+      expect(slow.ok).toBe(false);
+      expect(slow.log.errors[0]).toMatch(/Timed out after 1s/);
+      const after = await fast.computeMesh(src("cube(2);"));
+      expect(after.ok).toBe(true);
+    } finally {
+      await fast.dispose();
     }
-  });
-
-  it("should validate valid code", async () => {
-    const result = await engine.validate("cube([10, 10, 10]);");
-
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("should detect invalid code (mismatched brackets)", async () => {
-    const result = await engine.validate("cube([10, 10, 10);");
-
-    expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-
-  it("should return version info", async () => {
-    const version = await engine.version();
-    expect(version).toBeTruthy();
-    expect(version).not.toBe("unknown");
-    // Should contain version-like string
-    expect(version).toMatch(/\d+\.\d+/);
-  });
-
-  it("should apply parameter overrides", async () => {
-    const code = `
-      size = 10;
-      cube([size, size, size]);
-    `;
-
-    const result = await engine.exportModel({
-      code,
-      format: "stl",
-      params: { size: 20 },
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.outputBytes).toBeDefined();
-    expect(result.outputBytes!.length).toBeGreaterThan(0);
-  });
-
-  it("should handle multiple sequential exports", async () => {
-    const r1 = await engine.exportModel({
-      code: "cube([5, 5, 5]);",
-      format: "stl",
-    });
-    expect(r1.success).toBe(true);
-
-    const r2 = await engine.exportModel({
-      code: "sphere(r=10);",
-      format: "stl",
-    });
-    expect(r2.success).toBe(true);
-
-    // Sphere should produce more facets than cube
-    expect(r2.outputBytes!.length).toBeGreaterThan(r1.outputBytes!.length);
   });
 });

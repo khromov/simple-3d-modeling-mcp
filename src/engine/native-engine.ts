@@ -1,246 +1,224 @@
 /**
- * Native OpenSCAD CLI engine — implements the Engine interface by wrapping
- * the locally-installed OpenSCAD binary.
+ * Native OpenSCAD CLI engine. Used when OPENSCAD_PATH points at a binary, or
+ * when a Manifold-capable OpenSCAD (2024+ / nightly) is found automatically.
  */
 
-import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { randomUUID } from "node:crypto";
-import type {
-  Engine,
-  RenderPngOptions,
-  RenderResult,
-  ExportOptions,
-  ValidateResult,
-} from "./types.js";
+import { LIBRARIES_DIR, bundledLibraries } from "../paths.js";
+import type { CameraSpec } from "../rendering/camera.js";
+import { BaseEngine, timeoutMessage } from "./base-engine.js";
+import { parseLog, rewritePaths } from "./output.js";
+import { paramArgs } from "./params.js";
+import type { EngineCapabilities, PngRenderOptions, PreparedSource, RunJob, RunResult } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
-// ---------------------------------------------------------------------------
-// Public option types
-// ---------------------------------------------------------------------------
+export interface NativeProbe {
+  executable: string;
+  version: string;
+  manifold: boolean;
+}
+
+/** Runs `--version` / `--help`; throws when the binary is not a working OpenSCAD. */
+export async function probeOpenScad(executable: string): Promise<NativeProbe> {
+  let versionText: string;
+  try {
+    const r = await execFileAsync(executable, ["--version"], { timeout: 20_000, windowsHide: true });
+    versionText = `${r.stdout}${r.stderr}`.trim();
+  } catch (e: any) {
+    throw new Error(e?.code === "ENOENT" ? `${executable} not found` : `${executable} --version failed: ${e?.message ?? e}`);
+  }
+  if (!/openscad|\d{4}\.\d{2}/i.test(versionText)) {
+    throw new Error(`${executable} does not look like OpenSCAD (--version printed "${versionText.slice(0, 80)}")`);
+  }
+  let help = "";
+  try {
+    const r = await execFileAsync(executable, ["--help"], { timeout: 20_000, windowsHide: true });
+    help = `${r.stdout}${r.stderr}`;
+  } catch (e: any) {
+    help = `${e?.stdout ?? ""}${e?.stderr ?? ""}`; // some versions exit non-zero for --help
+  }
+  return { executable, version: versionText.split(/\r?\n/)[0], manifold: /--backend/.test(help) };
+}
+
+/** Candidate OpenSCAD binaries: PATH first (nightly preferred), then well-known install locations. */
+export function findOpenScadCandidates(env: NodeJS.ProcessEnv = process.env, os: NodeJS.Platform = platform()): string[] {
+  const out: string[] = [];
+  const add = (p: string) => {
+    if (!out.includes(p) && existsSync(p)) out.push(p);
+  };
+  const exts = os === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter(Boolean) : [""];
+  for (const dir of (env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const name of ["openscad-nightly", "openscad"]) {
+      for (const ext of exts) add(join(dir, name + ext.toLowerCase()));
+    }
+  }
+  if (os === "darwin") {
+    add("/Applications/OpenSCAD (Nightly).app/Contents/MacOS/OpenSCAD");
+    add("/Applications/OpenSCAD-Nightly.app/Contents/MacOS/OpenSCAD");
+    add("/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD");
+    add(join(homedir(), "Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"));
+  } else if (os === "win32") {
+    add("C:\\Program Files\\OpenSCAD (Nightly)\\openscad.exe");
+    add("C:\\Program Files\\OpenSCAD\\openscad.exe");
+    add("C:\\Program Files (x86)\\OpenSCAD\\openscad.exe");
+  } else {
+    add("/usr/bin/openscad-nightly");
+    add("/usr/bin/openscad");
+    add("/usr/local/bin/openscad");
+    add("/snap/bin/openscad");
+  }
+  return out;
+}
+
+function cameraArgs(camera: CameraSpec): string[] {
+  switch (camera.kind) {
+    case "fit":
+      return [`--camera=0,0,0,${camera.rot.join(",")},100`, "--autocenter", "--viewall"];
+    case "gimbal":
+      return [`--camera=${[...camera.translate, ...camera.rot, camera.distance].join(",")}`];
+    case "vector":
+      return [`--camera=${[...camera.eye, ...camera.center].join(",")}`];
+  }
+}
 
 export interface NativeEngineOptions {
-  /** Explicit path to the openscad binary */
-  executable?: string;
-  /** Directory for temp files (auto-created) */
   workDir?: string;
+  timeoutMs?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function which(name: string): string | null {
-  try {
-    const cmd = platform() === "win32" ? `where ${name}` : `which ${name}`;
-    const result = execFileSync(
-      platform() === "win32" ? "cmd" : "/bin/sh",
-      platform() === "win32" ? ["/c", cmd] : ["-c", cmd],
-      { encoding: "utf-8", timeout: 5000 }
-    );
-    return result.trim().split("\n")[0] || null;
-  } catch {
-    return null;
-  }
-}
-
-function findOpenSCAD(): string {
-  // Try PATH first
-  for (const name of ["openscad", "openscad-nightly"]) {
-    const found = which(name);
-    if (found) return found;
-  }
-
-  // Platform-specific well-known locations
-  const os = platform();
-  const candidates: string[] = [];
-
-  if (os === "darwin") {
-    candidates.push("/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD");
-  } else if (os === "win32") {
-    candidates.push(
-      "C:\\Program Files\\OpenSCAD\\openscad.exe",
-      "C:\\Program Files (x86)\\OpenSCAD\\openscad.exe"
-    );
-  } else {
-    candidates.push(
-      "/usr/bin/openscad",
-      "/usr/local/bin/openscad",
-      "/snap/bin/openscad"
-    );
-  }
-
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-
-  throw new Error(
-    "OpenSCAD not found. Install it from https://openscad.org/downloads.html " +
-    "and make sure it is on your PATH."
-  );
-}
-
-function parseStderr(stderr: string): { warnings: string[]; errors: string[] } {
-  const warnings: string[] = [];
-  const errors: string[] = [];
-  for (const line of stderr.split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    const lower = t.toLowerCase();
-    if (lower.includes("warning")) warnings.push(t);
-    else if (lower.includes("error") || lower.includes("parse error")) errors.push(t);
-  }
-  return { warnings, errors };
-}
-
-// ---------------------------------------------------------------------------
-// NativeEngine class
-// ---------------------------------------------------------------------------
-
-export class NativeEngine implements Engine {
-  readonly name = "native";
+export class NativeEngine extends BaseEngine {
+  readonly name = "native" as const;
+  readonly capabilities: EngineCapabilities;
   readonly workDir: string;
+  readonly timeoutMs: number;
+  /** Explanation of why this engine was chosen (shown by get_version). */
+  selectionNote?: string;
 
-  private _executable: string | undefined;
-  private readonly _requestedExecutable: string | undefined;
-
-  constructor(opts: NativeEngineOptions = {}) {
-    this._requestedExecutable = opts.executable;
-    this.workDir = opts.workDir ?? join(tmpdir(), `simple-3d-modeling-mcp-native-${process.pid}`);
-    mkdirSync(this.workDir, { recursive: true });
-  }
-
-  /** Lazily resolves the OpenSCAD binary so the server can start even if it's not yet installed. */
-  get executable(): string {
-    if (!this._executable) {
-      this._executable = this._requestedExecutable ?? findOpenSCAD();
-    }
-    return this._executable;
-  }
-
-  // -- Info ----------------------------------------------------------------
-
-  async version(): Promise<string> {
-    try {
-      const { stdout, stderr } = await execFileAsync(this.executable, ["--version"], { timeout: 10_000 });
-      return (stdout + stderr).trim();
-    } catch (e: any) {
-      return `Unknown (${e.message ?? e})`;
-    }
-  }
-
-  // -- Internal helpers ---------------------------------------------------
-
-  private writeScad(code: string): string {
-    const id = randomUUID();
-    const p = join(this.workDir, `${id}.scad`);
-    writeFileSync(p, code, "utf-8");
-    return p;
-  }
-
-  private async run(args: {
-    scadPath: string;
-    outputPath: string;
-    params?: Record<string, string | number | boolean>;
-    camera?: string;
-    imageSize?: [number, number];
-    renderFull?: boolean;
-    colorscheme?: string;
-    timeout?: number;
-  }): Promise<RenderResult> {
-    const cmd: string[] = [];
-
-    if (args.renderFull !== false) cmd.push("--render");
-    if (args.camera) cmd.push("--camera", args.camera);
-    if (args.imageSize) cmd.push("--imgsize", `${args.imageSize[0]},${args.imageSize[1]}`);
-    if (args.colorscheme) cmd.push("--colorscheme", args.colorscheme);
-
-    if (args.params) {
-      for (const [k, v] of Object.entries(args.params)) {
-        if (typeof v === "boolean") cmd.push("-D", `${k}=${v ? "true" : "false"}`);
-        else if (typeof v === "string") cmd.push("-D", `${k}="${v}"`);
-        else cmd.push("-D", `${k}=${v}`);
-      }
-    }
-
-    cmd.push("-o", args.outputPath, args.scadPath);
-
-    try {
-      const { stdout, stderr } = await execFileAsync(
-        this.executable,
-        cmd,
-        { timeout: (args.timeout ?? 120) * 1000 }
-      );
-
-      const { warnings, errors } = parseStderr(stderr);
-      const success = existsSync(args.outputPath);
-
-      return {
-        success,
-        outputPath: success ? args.outputPath : undefined,
-        outputBytes: success ? readFileSync(args.outputPath) : undefined,
-        stdout,
-        stderr,
-        warnings,
-        errors,
-      };
-    } catch (e: any) {
-      const stderr: string = e.stderr ?? String(e);
-      const { warnings, errors } = parseStderr(stderr);
-      if (e.killed) {
-        errors.push(`Timeout after ${args.timeout ?? 120}s – model may be too complex.`);
-      }
-      return { success: false, stdout: e.stdout ?? "", stderr, warnings, errors };
-    }
-  }
-
-  // -- Engine interface implementation ------------------------------------
-
-  async renderPng(opts: RenderPngOptions): Promise<RenderResult> {
-    const id = randomUUID();
-    const scadPath = this.writeScad(opts.code);
-    const outputPath = join(this.workDir, `${id}.png`);
-    return this.run({
-      scadPath,
-      outputPath,
-      params: opts.params,
-      camera: opts.camera,
-      imageSize: opts.imageSize ?? [1024, 768],
-      colorscheme: opts.colorscheme ?? "Tomorrow Night",
-    });
-  }
-
-  async exportModel(opts: ExportOptions): Promise<RenderResult> {
-    const id = randomUUID();
-    const fmt = (opts.format ?? "stl").toLowerCase().replace(/^\./, "");
-    const scadPath = this.writeScad(opts.code);
-    const outputPath = join(this.workDir, opts.filename ?? `${id}.${fmt}`);
-    return this.run({ scadPath, outputPath, params: opts.params });
-  }
-
-  async validate(code: string): Promise<ValidateResult> {
-    const id = randomUUID();
-    const scadPath = this.writeScad(code);
-    const outputPath = join(this.workDir, `${id}.csg`);
-    const result = await this.run({ scadPath, outputPath, renderFull: false, timeout: 30 });
-    return {
-      valid: result.success,
-      warnings: result.warnings,
-      errors: result.errors,
+  constructor(readonly probe: NativeProbe, opts: NativeEngineOptions = {}) {
+    super();
+    this.workDir = opts.workDir ?? join(tmpdir(), "simple-3d-modeling-mcp");
+    this.timeoutMs = opts.timeoutMs ?? 120_000;
+    this.capabilities = {
+      png: true,
+      manifold: probe.manifold,
+      exportFormats: ["stl", "off", "obj", "amf", "3mf", "dxf", "svg", "pdf", "csg"],
     };
   }
+
+  static async create(executable: string, opts: NativeEngineOptions = {}): Promise<NativeEngine> {
+    return new NativeEngine(await probeOpenScad(executable), opts);
+  }
+
+  get executable(): string {
+    return this.probe.executable;
+  }
+
+  /** OPENSCADPATH: the user's value, plus bundled libraries they don't already have. */
+  private openscadPath(): string {
+    const parts = (process.env.OPENSCADPATH ?? "").split(delimiter).filter(Boolean);
+    const installed = new Set(Object.keys(this.listLibraries()));
+    if (bundledLibraries().some((lib) => !installed.has(lib))) parts.push(LIBRARIES_DIR);
+    return parts.join(delimiter);
+  }
+
+  async run(job: RunJob): Promise<RunResult> {
+    const started = performance.now();
+    await mkdir(this.workDir, { recursive: true });
+    const tmp = await mkdtemp(join(this.workDir, "job-"));
+    try {
+      const useOriginal = !!job.src.path && !job.extraFiles?.length;
+      const mainPath = useOriginal ? job.src.path! : join(tmp, "input.scad");
+      if (!useOriginal) await writeFile(mainPath, job.src.code, "utf8");
+      for (const extra of job.extraFiles ?? []) await writeFile(join(tmp, extra.name), extra.data);
+      const outPath = join(tmp, `result.${job.outputExt}`);
+      const args = [...(job.args ?? []), ...paramArgs(job.params), "-o", outPath, mainPath];
+      const timeoutMs = job.timeoutMs ?? this.timeoutMs;
+
+      let stdout = "";
+      let stderr = "";
+      let exitCode = 0;
+      let timedOut = false;
+      try {
+        const r = await execFileAsync(this.executable, args, {
+          timeout: timeoutMs,
+          maxBuffer: 64 * 1024 * 1024,
+          cwd: dirname(mainPath),
+          env: { ...process.env, OPENSCADPATH: this.openscadPath() },
+          windowsHide: true,
+        });
+        stdout = r.stdout;
+        stderr = r.stderr;
+      } catch (e: any) {
+        stdout = e?.stdout ?? "";
+        stderr = e?.stderr ?? "";
+        timedOut = e?.killed === true;
+        exitCode = typeof e?.code === "number" ? e.code : -1;
+        if (!stderr && !timedOut) stderr = `ERROR: ${e?.message ?? e}`;
+      }
+
+      const raw = `${stderr}\n${stdout}`.split(/\r?\n/);
+      let log = parseLog(raw);
+      if (!useOriginal) log = rewritePaths(log, [[mainPath, "input.scad"]]);
+      if (timedOut) log.errors.push(timeoutMessage(timeoutMs));
+      let output: Uint8Array | undefined;
+      try {
+        output = new Uint8Array(await readFile(outPath));
+      } catch {
+        // no output
+      }
+      if (exitCode !== 0 && log.errors.length === 0) log.errors.push(`ERROR: OpenSCAD exited with code ${exitCode}`);
+      const ok = exitCode === 0 && !timedOut && log.errors.length === 0 && output !== undefined;
+      return { ok, output, log, exitCode, timedOut, raw, timeMs: performance.now() - started };
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  }
+
+  /** OpenSCAD's own preview render (OpenCSG): fast and shows color(). */
+  renderPng(src: PreparedSource, opts: PngRenderOptions): Promise<RunResult> {
+    const args = [
+      ...cameraArgs(opts.camera),
+      `--projection=${opts.projection === "orthographic" ? "ortho" : "perspective"}`,
+      `--imgsize=${opts.width},${opts.height}`,
+    ];
+    if (opts.colorscheme) args.push(`--colorscheme=${opts.colorscheme}`);
+    return this.run({ src, params: opts.params, outputExt: "png", args });
+  }
+
+  async version(): Promise<string> {
+    return this.probe.version;
+  }
+
+  async describe(): Promise<Record<string, string>> {
+    const libs = Object.keys(this.listLibraries());
+    const info: Record<string, string> = {
+      Engine: "Native OpenSCAD",
+      Executable: this.executable,
+      OpenSCAD: this.probe.version,
+      Backend: this.probe.manifold ? "Manifold" : "CGAL (slow — a 2024+ or nightly OpenSCAD adds the much faster Manifold backend)",
+      "PNG previews": "OpenSCAD preview (falls back to the software renderer if OpenGL is unavailable)",
+      "Installed libraries": libs.length ? libs.join(", ") : "none",
+      "Bundled libraries": bundledLibraries().join(", ") || "none",
+      Timeout: `${Math.round(this.timeoutMs / 1000)}s per job`,
+    };
+    if (this.selectionNote) info.Selection = this.selectionNote;
+    return info;
+  }
+
+  async dispose(): Promise<void> {}
 
   // -- Native-only extras -------------------------------------------------
 
   libraryPaths(): string[] {
     const home = homedir();
     const os = platform();
-    const candidates: string[] = [];
-
+    const candidates = (process.env.OPENSCADPATH ?? "").split(delimiter).filter(Boolean);
     if (os === "darwin") {
       candidates.push(join(home, "Documents", "OpenSCAD", "libraries"));
       candidates.push(join(home, "Library", "Application Support", "OpenSCAD", "libraries"));
@@ -251,8 +229,7 @@ export class NativeEngine implements Engine {
       candidates.push("/usr/share/openscad/libraries");
       candidates.push("/usr/local/share/openscad/libraries");
     }
-
-    return candidates.filter((p) => existsSync(p));
+    return [...new Set(candidates)].filter((p) => existsSync(p));
   }
 
   listLibraries(): Record<string, string[]> {
@@ -261,14 +238,10 @@ export class NativeEngine implements Engine {
       try {
         for (const entry of readdirSync(libDir)) {
           const full = join(libDir, entry);
-          const stat = statSync(full);
-          if (stat.isDirectory()) {
-            const files = readdirSync(full)
-              .filter((f) => f.endsWith(".scad"))
-              .slice(0, 20);
-            libs[entry] = files;
+          if (statSync(full).isDirectory()) {
+            libs[entry] = readdirSync(full).filter((f) => f.endsWith(".scad")).slice(0, 20);
           } else if (entry.endsWith(".scad")) {
-            libs[entry.replace(".scad", "")] = [entry];
+            libs[entry.replace(/\.scad$/, "")] = [entry];
           }
         }
       } catch {

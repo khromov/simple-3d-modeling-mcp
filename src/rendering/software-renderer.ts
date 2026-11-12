@@ -1,318 +1,385 @@
 /**
- * Software STL-to-PNG renderer.
+ * Software mesh renderer used for previews when OpenSCAD itself cannot render
+ * PNGs (the WASM build has no OpenGL).
  *
- * Falls back to this when WASM OpenSCAD can't render PNG (no OpenGL).
- * Uses basic triangle rasterization with z-buffer and flat shading,
- * then converts the pixel buffer to PNG via upng-js (pure JS, no native deps).
+ * - OpenSCAD camera conventions (presets, gimbal and vector cameras)
+ * - automatic framing, perspective or orthographic projection
+ * - per-face colours from color(), two-light shading with a specular highlight
+ * - supersampled anti-aliasing, crease/silhouette outlines, axis gizmo, labels
  */
 
-// @ts-expect-error — no type declarations
-import UPNG from "upng-js";
+import { isDefaultColor, type Mesh } from "../geometry/mesh.js";
+import { drawText } from "./bitmap-font.js";
+import {
+  applyMat,
+  cameraRotation,
+  DEFAULT_FOV,
+  gimbalMatrix,
+  lookAtMatrix,
+  PRESET_VIEWS,
+  type CameraSpec,
+  type Mat3,
+  type Projection,
+  type Vec3,
+} from "./camera.js";
+import { encodePng } from "./png.js";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+export type RGB = [number, number, number];
 
-export interface SoftwareRenderOptions {
-  stlBytes: Uint8Array;
+export const THEME = {
+  background: [22, 22, 42] as RGB,
+  model: [255, 140, 0] as RGB,
+  label: [205, 205, 220] as RGB,
+  axes: [[229, 83, 75], [87, 171, 90], [83, 155, 245]] as RGB[],
+};
+
+export interface RenderOptions {
   width: number;
   height: number;
-  /** OpenSCAD-style camera: "translateX,translateY,translateZ,rotX,rotY,rotZ,distance" */
-  camera?: string;
-  background?: { r: number; g: number; b: number };
-  modelColor?: { r: number; g: number; b: number };
+  /** Default: auto-framed OpenSCAD default view (55, 0, 25). */
+  camera?: CameraSpec;
+  projection?: Projection;
+  /** Supersampling factor for anti-aliasing (1–4, default 2). */
+  supersample?: number;
+  background?: RGB;
+  /** Colour for faces without an explicit color(). */
+  modelColor?: RGB;
+  /** Draw crease and silhouette outlines (default true). */
+  edges?: boolean;
+  /** Draw the XYZ axis gizmo (default true). */
+  axes?: boolean;
+  /** Text drawn in the top-left corner. */
+  label?: string;
+  /** Frame this bounding sphere instead of fitting tightly (keeps turntable frames steady). */
+  sphere?: { center: Vec3; radius: number };
+  /** Fraction of the frame the model may fill (default 0.88). */
+  margin?: number;
 }
 
-interface Triangle {
-  v0: [number, number, number];
-  v1: [number, number, number];
-  v2: [number, number, number];
-  normal: [number, number, number];
+export interface RenderedImage {
+  width: number;
+  height: number;
+  rgba: Uint8Array;
 }
 
-// ---------------------------------------------------------------------------
-// STL parsing
-// ---------------------------------------------------------------------------
+const RAD = Math.PI / 180;
+const CREASE_COS = Math.cos(35 * RAD);
+const L1 = norm3(-0.4, 0.55, 0.75);
+const L2 = norm3(0.55, -0.35, 0.45);
+const HALF = norm3(L1[0], L1[1], L1[2] + 1);
 
-function parseSTL(input: Uint8Array): Triangle[] {
-  // Check if ASCII STL (starts with "solid")
-  const header = new TextDecoder().decode(input.slice(0, 6));
-  if (header.startsWith("solid ") || header.startsWith("solid\n")) {
-    return parseAsciiSTL(input);
-  }
-  return parseBinarySTL(input);
+function norm3(x: number, y: number, z: number): Vec3 {
+  const l = Math.hypot(x, y, z) || 1;
+  return [x / l, y / l, z / l];
 }
 
-function parseAsciiSTL(input: Uint8Array): Triangle[] {
-  const text = new TextDecoder().decode(input);
-  const triangles: Triangle[] = [];
-  const facetRegex = /facet\s+normal\s+([-\d.e+]+)\s+([-\d.e+]+)\s+([-\d.e+]+)\s+outer\s+loop\s+vertex\s+([-\d.e+]+)\s+([-\d.e+]+)\s+([-\d.e+]+)\s+vertex\s+([-\d.e+]+)\s+([-\d.e+]+)\s+([-\d.e+]+)\s+vertex\s+([-\d.e+]+)\s+([-\d.e+]+)\s+([-\d.e+]+)\s+endloop\s+endfacet/gi;
-
-  let match: RegExpExecArray | null;
-  while ((match = facetRegex.exec(text)) !== null) {
-    triangles.push({
-      normal: [parseFloat(match[1]), parseFloat(match[2]), parseFloat(match[3])],
-      v0: [parseFloat(match[4]), parseFloat(match[5]), parseFloat(match[6])],
-      v1: [parseFloat(match[7]), parseFloat(match[8]), parseFloat(match[9])],
-      v2: [parseFloat(match[10]), parseFloat(match[11]), parseFloat(match[12])],
-    });
-  }
-  return triangles;
-}
-
-function parseBinarySTL(input: Uint8Array): Triangle[] {
-  // Copy to ensure we have a clean ArrayBuffer (WASM may share a large backing buffer)
-  const buffer = new Uint8Array(input);
-  const view = new DataView(buffer.buffer);
-  const triangleCount = view.getUint32(80, true);
-  const triangles: Triangle[] = [];
-
-  for (let i = 0; i < triangleCount; i++) {
-    const off = 84 + i * 50;
-    const normal: [number, number, number] = [
-      view.getFloat32(off, true),
-      view.getFloat32(off + 4, true),
-      view.getFloat32(off + 8, true),
-    ];
-    const v0: [number, number, number] = [
-      view.getFloat32(off + 12, true),
-      view.getFloat32(off + 16, true),
-      view.getFloat32(off + 20, true),
-    ];
-    const v1: [number, number, number] = [
-      view.getFloat32(off + 24, true),
-      view.getFloat32(off + 28, true),
-      view.getFloat32(off + 32, true),
-    ];
-    const v2: [number, number, number] = [
-      view.getFloat32(off + 36, true),
-      view.getFloat32(off + 40, true),
-      view.getFloat32(off + 44, true),
-    ];
-    triangles.push({ v0, v1, v2, normal });
-  }
-  return triangles;
-}
-
-// ---------------------------------------------------------------------------
-// Math helpers
-// ---------------------------------------------------------------------------
-
-type Vec3 = [number, number, number];
-
-function sub(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-
-function dot(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-function normalize(v: Vec3): Vec3 {
-  const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-  if (len === 0) return [0, 0, 0];
-  return [v[0] / len, v[1] / len, v[2] / len];
-}
-
-function cross(a: Vec3, b: Vec3): Vec3 {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
-}
-
-/** Rotate point by OpenSCAD-style Euler angles (degrees): rotX around X, then rotY around Y, then rotZ around Z. */
-function rotateEuler(p: Vec3, rotX: number, rotY: number, rotZ: number): Vec3 {
-  const toRad = Math.PI / 180;
-  let [x, y, z] = p;
-
-  // Rotate around X
-  const cx = Math.cos(rotX * toRad), sx = Math.sin(rotX * toRad);
-  let y1 = y * cx - z * sx;
-  let z1 = y * sx + z * cx;
-  y = y1; z = z1;
-
-  // Rotate around Y
-  const cy = Math.cos(rotY * toRad), sy = Math.sin(rotY * toRad);
-  let x1 = x * cy + z * sy;
-  z1 = -x * sy + z * cy;
-  x = x1; z = z1;
-
-  // Rotate around Z
-  const cz = Math.cos(rotZ * toRad), sz = Math.sin(rotZ * toRad);
-  x1 = x * cz - y * sz;
-  y1 = x * sz + y * cz;
-  x = x1; y = y1;
-
-  return [x, y, z];
-}
-
-// ---------------------------------------------------------------------------
-// Rasterizer
-// ---------------------------------------------------------------------------
-
-function edgeFunction(a: [number, number], b: [number, number], c: [number, number]): number {
-  return (c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0]);
-}
-
-export async function renderStlToPng(opts: SoftwareRenderOptions): Promise<Uint8Array> {
-  const { stlBytes, width, height } = opts;
-  const bg = opts.background ?? { r: 22, g: 22, b: 42 };
-  const mc = opts.modelColor ?? { r: 255, g: 140, b: 0 };
-
-  const triangles = parseSTL(stlBytes);
-  if (triangles.length === 0) {
-    // Return a blank image
-    const blankPixels = new Uint8Array(width * height * 4);
-    for (let i = 0; i < width * height; i++) {
-      blankPixels[i * 4] = bg.r;
-      blankPixels[i * 4 + 1] = bg.g;
-      blankPixels[i * 4 + 2] = bg.b;
-      blankPixels[i * 4 + 3] = 255;
-    }
-    return new Uint8Array(UPNG.encode([blankPixels.buffer], width, height, 0));
-  }
-
-  // Parse camera string
-  let translateX = 0, translateY = 0, translateZ = 0;
-  let rotX = 55, rotY = 0, rotZ = 25, distance = 0;
-  if (opts.camera) {
-    const parts = opts.camera.split(",").map(Number);
-    if (parts.length >= 7) {
-      [translateX, translateY, translateZ, rotX, rotY, rotZ, distance] = parts;
+export function meshBounds(mesh: Mesh): { min: Vec3; max: Vec3; center: Vec3; radius: number } {
+  const p = mesh.positions;
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < p.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      if (p[i + k] < min[k]) min[k] = p[i + k];
+      if (p[i + k] > max[k]) max[k] = p[i + k];
     }
   }
+  if (p.length === 0) return { min: [0, 0, 0], max: [0, 0, 0], center: [0, 0, 0], radius: 1 };
+  const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  const radius = Math.max(1e-6, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
+  return { min, max, center, radius };
+}
 
-  // Compute bounding box for auto-distance
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const tri of triangles) {
-    for (const v of [tri.v0, tri.v1, tri.v2]) {
-      minX = Math.min(minX, v[0]); maxX = Math.max(maxX, v[0]);
-      minY = Math.min(minY, v[1]); maxY = Math.max(maxY, v[1]);
-      minZ = Math.min(minZ, v[2]); maxZ = Math.max(maxZ, v[2]);
+export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
+  const S = Math.min(4, Math.max(1, Math.round(opts.supersample ?? 2)));
+  const w = Math.max(1, Math.round(opts.width));
+  const h = Math.max(1, Math.round(opts.height));
+  const W = w * S, H = h * S;
+  const aspect = w / h;
+  const fovScale = 1 / Math.tan((DEFAULT_FOV * RAD) / 2);
+  const margin = opts.margin ?? 0.88;
+  const camera: CameraSpec = opts.camera ?? { kind: "fit", rot: [...PRESET_VIEWS.perspective] };
+  const ortho = opts.projection === "orthographic";
+  const bg = opts.background ?? THEME.background;
+  const baseColor = opts.modelColor ?? THEME.model;
+  const bounds = meshBounds(mesh);
+  const sceneR = opts.sphere?.radius ?? bounds.radius;
+
+  const P = mesh.positions;
+  const nv = P.length / 3;
+  const nt = mesh.indices.length / 3;
+
+  // --- Eye space -------------------------------------------------------------
+  let R: Mat3;
+  let origin: Vec3;
+  let dist = 0;
+  if (camera.kind === "vector") {
+    R = lookAtMatrix(camera.eye, camera.center);
+    origin = camera.eye;
+  } else {
+    R = gimbalMatrix(camera.rot);
+    origin = camera.kind === "gimbal" ? camera.translate : opts.sphere?.center ?? bounds.center;
+    if (camera.kind === "gimbal") dist = camera.distance;
+  }
+  const ex = new Float64Array(nv), ey = new Float64Array(nv), ez = new Float64Array(nv);
+  for (let v = 0; v < nv; v++) {
+    const [x, y, z] = applyMat(R, P[v * 3] - origin[0], P[v * 3 + 1] - origin[1], P[v * 3 + 2] - origin[2]);
+    ex[v] = x;
+    ey[v] = y;
+    ez[v] = z;
+  }
+
+  // Projection parameters: ndcX = (ex·kx + bx) / (ortho ? 1 : w), …
+  let orthoK = 1, cx = 0, cy = 0;
+  let post = { sx: 1, sy: 1, ox: 0, oy: 0 }; // affine applied after projection (tight perspective fit)
+  if (camera.kind === "fit") {
+    const t = Math.min(1, aspect) / fovScale; // tan of the limiting half-angle
+    if (ortho) {
+      if (opts.sphere) {
+        orthoK = (margin * Math.min(1, aspect)) / sceneR;
+      } else {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (let v = 0; v < nv; v++) {
+          minX = Math.min(minX, ex[v]); maxX = Math.max(maxX, ex[v]);
+          minY = Math.min(minY, ey[v]); maxY = Math.max(maxY, ey[v]);
+        }
+        cx = (minX + maxX) / 2;
+        cy = (minY + maxY) / 2;
+        orthoK = margin / Math.max((maxX - minX) / 2 / aspect, (maxY - minY) / 2, 1e-9);
+      }
+    } else if (opts.sphere) {
+      dist = sceneR * Math.sqrt(1 + 1 / (margin * t) ** 2);
+    } else {
+      let maxZ = -Infinity;
+      for (let v = 0; v < nv; v++) {
+        const dx = ez[v] + (Math.abs(ex[v]) * fovScale) / (aspect * margin);
+        const dy = ez[v] + (Math.abs(ey[v]) * fovScale) / margin;
+        dist = Math.max(dist, dx, dy);
+        maxZ = Math.max(maxZ, ez[v]);
+      }
+      dist = Math.max(dist, maxZ + sceneR * 0.05);
+      // Re-centre and zoom on the projected extents.
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (let v = 0; v < nv; v++) {
+        const wv = dist - ez[v];
+        const px = (ex[v] * fovScale) / (aspect * wv), py = (ey[v] * fovScale) / wv;
+        minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+        minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+      }
+      const half = Math.max((maxX - minX) / 2, (maxY - minY) / 2, 1e-9);
+      const zoom = margin / half;
+      post = { sx: zoom, sy: zoom, ox: -((minX + maxX) / 2) * zoom, oy: -((minY + maxY) / 2) * zoom };
     }
-  }
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const centerZ = (minZ + maxZ) / 2;
-  const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-
-  // Auto-distance: ensure the model fits in frame regardless of provided distance
-  const autoDistance = maxDim * 4;
-  if (distance <= 0 || distance < autoDistance) {
-    distance = autoDistance;
+  } else if (ortho) {
+    const ref = camera.kind === "gimbal" ? camera.distance : Math.hypot(...(sub(camera.center, camera.eye)));
+    orthoK = fovScale / Math.max(ref, 1e-9);
   }
 
-  // Transform triangles: center, translate, rotate, then project
-  const light: Vec3 = normalize([0.3, 0.5, 1.0]);
-  const fov = 22.5; // OpenSCAD default FOV
-  const aspect = width / height;
-  const fovScale = 1 / Math.tan((fov * Math.PI) / 180 / 2);
-
-  // Pixel buffer (RGB)
-  const pixels = Buffer.alloc(width * height * 3);
-  const zBuffer = new Float64Array(width * height).fill(Infinity);
-
-  // Fill background
-  for (let i = 0; i < width * height; i++) {
-    pixels[i * 3] = bg.r;
-    pixels[i * 3 + 1] = bg.g;
-    pixels[i * 3 + 2] = bg.b;
+  // Screen coordinates (supersampled pixels) and depth keys (greater = closer).
+  const sx = new Float64Array(nv), sy = new Float64Array(nv), dk = new Float64Array(nv);
+  const valid = new Uint8Array(nv);
+  const near = sceneR * 1e-4;
+  for (let v = 0; v < nv; v++) {
+    const zEye = ez[v] - dist;
+    let nx: number, ny: number;
+    if (ortho) {
+      nx = ((ex[v] - cx) * orthoK) / aspect;
+      ny = (ey[v] - cy) * orthoK;
+      dk[v] = zEye;
+      valid[v] = 1;
+    } else {
+      const wv = -zEye;
+      if (wv <= near) continue;
+      nx = (ex[v] * fovScale) / (aspect * wv);
+      ny = (ey[v] * fovScale) / wv;
+      dk[v] = 1 / wv;
+      valid[v] = 1;
+    }
+    nx = nx * post.sx + post.ox;
+    ny = ny * post.sy + post.oy;
+    sx[v] = (nx + 1) * 0.5 * W;
+    sy[v] = (1 - ny) * 0.5 * H;
   }
 
-  // Process triangles
-  for (const tri of triangles) {
-    // Center and translate
-    const verts: Vec3[] = [tri.v0, tri.v1, tri.v2].map((v) => [
-      v[0] - centerX + translateX,
-      v[1] - centerY + translateY,
-      v[2] - centerZ + translateZ,
-    ] as Vec3);
+  // --- Per-face normals and shading -----------------------------------------
+  const idx = mesh.indices;
+  const fnx = new Float32Array(nt), fny = new Float32Array(nt), fnz = new Float32Array(nt), fd = new Float32Array(nt);
+  const shade = new Uint8Array(nt * 3);
+  const colors = mesh.colors;
+  for (let t = 0; t < nt; t++) {
+    const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+    const ax = ex[a], ay = ey[a], az = ez[a] - dist;
+    const ux = ex[b] - ax, uy = ey[b] - ay, uz = ez[b] - dist - az;
+    const vx = ex[c] - ax, vy = ey[c] - ay, vz = ez[c] - dist - az;
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    // Two-sided lighting: flip normals that face away from the camera.
+    const facing = ortho ? nz : -(nx * ax + ny * ay + nz * az);
+    if (facing < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    fnx[t] = nx; fny[t] = ny; fnz[t] = nz;
+    fd[t] = nx * ax + ny * ay + nz * az;
 
-    // Rotate
-    const rotated = verts.map((v) => rotateEuler(v, rotX, rotY, rotZ));
+    let r = baseColor[0], g = baseColor[1], bl = baseColor[2];
+    if (colors && !isDefaultColor(colors[t * 4], colors[t * 4 + 1], colors[t * 4 + 2])) {
+      r = colors[t * 4]; g = colors[t * 4 + 1]; bl = colors[t * 4 + 2];
+    }
+    const d1 = Math.max(0, nx * L1[0] + ny * L1[1] + nz * L1[2]);
+    const d2 = Math.max(0, nx * L2[0] + ny * L2[1] + nz * L2[2]);
+    const sp = 0.22 * Math.pow(Math.max(0, nx * HALF[0] + ny * HALF[1] + nz * HALF[2]), 32) * 255;
+    const k = 0.3 + 0.62 * d1 + 0.18 * d2;
+    shade[t * 3] = Math.min(255, r * k + sp);
+    shade[t * 3 + 1] = Math.min(255, g * k + sp);
+    shade[t * 3 + 2] = Math.min(255, bl * k + sp);
+  }
 
-    // Move along Z by distance (camera at origin looking down -Z after rotation)
-    const projected: Vec3[] = rotated.map((v) => [v[0], v[1], v[2] - distance] as Vec3);
-
-    // Skip triangles behind camera
-    if (projected.every((v) => v[2] >= 0)) continue;
-
-    // Perspective project to screen
-    const screen: [number, number, number][] = projected.map((v) => {
-      const iz = -1 / v[2]; // v[2] is negative (in front of camera)
-      const sx = (v[0] * iz * fovScale / aspect + 1) * 0.5 * width;
-      const sy = (1 - v[1] * iz * fovScale) * 0.5 * height;
-      return [sx, sy, v[2]];
-    });
-
-    // Compute face normal from rotated vertices for shading
-    const e1 = sub(rotated[1], rotated[0]);
-    const e2 = sub(rotated[2], rotated[0]);
-    const faceNormal = normalize(cross(e1, e2));
-
-    // Back-face culling
-    if (faceNormal[2] <= 0) continue;
-
-    // Shading: ambient + diffuse
-    const ambient = 0.25;
-    const diffuse = Math.max(0, dot(faceNormal, light));
-    const intensity = Math.min(1, ambient + diffuse * 0.75);
-
-    const r = Math.round(mc.r * intensity);
-    const g = Math.round(mc.g * intensity);
-    const b = Math.round(mc.b * intensity);
-
-    // Bounding box
-    const minSx = Math.max(0, Math.floor(Math.min(screen[0][0], screen[1][0], screen[2][0])));
-    const maxSx = Math.min(width - 1, Math.ceil(Math.max(screen[0][0], screen[1][0], screen[2][0])));
-    const minSy = Math.max(0, Math.floor(Math.min(screen[0][1], screen[1][1], screen[2][1])));
-    const maxSy = Math.min(height - 1, Math.ceil(Math.max(screen[0][1], screen[1][1], screen[2][1])));
-
-    const area = edgeFunction(
-      [screen[0][0], screen[0][1]],
-      [screen[1][0], screen[1][1]],
-      [screen[2][0], screen[2][1]]
-    );
-    if (Math.abs(area) < 0.001) continue; // Degenerate triangle
-
-    // Rasterize
-    for (let py = minSy; py <= maxSy; py++) {
-      for (let px = minSx; px <= maxSx; px++) {
-        const p: [number, number] = [px + 0.5, py + 0.5];
-        const w0 = edgeFunction([screen[1][0], screen[1][1]], [screen[2][0], screen[2][1]], p);
-        const w1 = edgeFunction([screen[2][0], screen[2][1]], [screen[0][0], screen[0][1]], p);
-        const w2 = edgeFunction([screen[0][0], screen[0][1]], [screen[1][0], screen[1][1]], p);
-
-        if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0)) {
-          // Interpolate Z
-          const bary0 = w0 / area;
-          const bary1 = w1 / area;
-          const bary2 = w2 / area;
-          const z = bary0 * screen[0][2] + bary1 * screen[1][2] + bary2 * screen[2][2];
-
-          const idx = py * width + px;
-          if (z < zBuffer[idx]) {
-            zBuffer[idx] = z;
-            pixels[idx * 3] = r;
-            pixels[idx * 3 + 1] = g;
-            pixels[idx * 3 + 2] = b;
-          }
+  // --- Rasterise --------------------------------------------------------------
+  const zbuf = new Float32Array(W * H).fill(-Infinity);
+  const fid = new Int32Array(W * H).fill(-1);
+  for (let t = 0; t < nt; t++) {
+    const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+    if (!valid[a] || !valid[b] || !valid[c]) continue;
+    const x0 = sx[a], y0 = sy[a], x1 = sx[b], y1 = sy[b], x2 = sx[c], y2 = sy[c];
+    const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+    if (Math.abs(area) < 1e-12) continue;
+    const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
+    const maxX = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)));
+    const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
+    const maxY = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)));
+    if (minX > maxX || minY > maxY) continue;
+    const inv = 1 / area;
+    const z0 = dk[a], z1 = dk[b], z2 = dk[c];
+    const dw0 = (y1 - y2) * inv, dw1 = (y2 - y0) * inv;
+    const eps = -1e-7;
+    for (let py = minY; py <= maxY; py++) {
+      const pyc = py + 0.5;
+      const pxc = minX + 0.5;
+      let w0 = ((x1 - pxc) * (y2 - pyc) - (x2 - pxc) * (y1 - pyc)) * inv;
+      let w1 = ((x2 - pxc) * (y0 - pyc) - (x0 - pxc) * (y2 - pyc)) * inv;
+      let row = py * W + minX;
+      for (let px = minX; px <= maxX; px++, row++, w0 += dw0, w1 += dw1) {
+        const w2 = 1 - w0 - w1;
+        if (w0 < eps || w1 < eps || w2 < eps) continue;
+        const z = w0 * z0 + w1 * z1 + w2 * z2;
+        if (z > zbuf[row]) {
+          zbuf[row] = z;
+          fid[row] = t;
         }
       }
     }
   }
 
-  // Convert RGB to RGBA for UPNG
-  const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    rgba[i * 4] = pixels[i * 3];
-    rgba[i * 4 + 1] = pixels[i * 3 + 1];
-    rgba[i * 4 + 2] = pixels[i * 3 + 2];
-    rgba[i * 4 + 3] = 255;
+  // --- Colour + outlines ------------------------------------------------------
+  const rgb = new Uint8Array(W * H * 3);
+  for (let i = 0; i < W * H; i++) {
+    const f = fid[i];
+    const o = i * 3;
+    if (f < 0) {
+      rgb[o] = bg[0]; rgb[o + 1] = bg[1]; rgb[o + 2] = bg[2];
+    } else {
+      rgb[o] = shade[f * 3]; rgb[o + 1] = shade[f * 3 + 1]; rgb[o + 2] = shade[f * 3 + 2];
+    }
   }
 
-  return new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0));
+  if (opts.edges !== false && nt > 0) {
+    const mask = new Uint8Array(W * H);
+    const lin = (i: number) => (ortho ? -zbuf[i] : 1 / zbuf[i]);
+    const depthTol = sceneR * 0.04;
+    const planeTol = sceneR * 0.002;
+    const check = (i: number, j: number) => {
+      const f = fid[i], g = fid[j];
+      if (f === g) return;
+      if (f < 0 || g < 0) {
+        mask[f < 0 ? j : i] = 1; // silhouette: darken the model side
+        return;
+      }
+      const dot = fnx[f] * fnx[g] + fny[f] * fny[g] + fnz[f] * fnz[g];
+      if (
+        dot < CREASE_COS ||
+        Math.abs(lin(i) - lin(j)) > depthTol ||
+        (dot > 0.9999 && Math.abs(fd[f] - fd[g]) > planeTol)
+      ) {
+        mask[i] = 1;
+        mask[j] = 1;
+      }
+    };
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (x + 1 < W) check(i, i + 1);
+        if (y + 1 < H) check(i, i + W);
+      }
+    }
+    for (let i = 0; i < W * H; i++) {
+      if (!mask[i]) continue;
+      const o = i * 3;
+      rgb[o] = rgb[o] * 0.4; rgb[o + 1] = rgb[o + 1] * 0.4; rgb[o + 2] = rgb[o + 2] * 0.4;
+    }
+  }
+
+  // --- Overlays (drawn supersampled, so they get anti-aliased too) ----------
+  if (opts.axes !== false) drawAxes(rgb, W, H, S, cameraRotation(camera));
+  if (opts.label) drawText(rgb, W, H, 3, 8 * S, 8 * S, opts.label, 2 * S, THEME.label);
+
+  // --- Downsample -------------------------------------------------------------
+  const out = new Uint8Array(w * h * 4);
+  const n = S * S;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0;
+      for (let sy2 = 0; sy2 < S; sy2++) {
+        let o = ((y * S + sy2) * W + x * S) * 3;
+        for (let sx2 = 0; sx2 < S; sx2++, o += 3) {
+          r += rgb[o]; g += rgb[o + 1]; b += rgb[o + 2];
+        }
+      }
+      const d = (y * w + x) * 4;
+      out[d] = Math.round(r / n);
+      out[d + 1] = Math.round(g / n);
+      out[d + 2] = Math.round(b / n);
+      out[d + 3] = 255;
+    }
+  }
+  return { width: w, height: h, rgba: out };
+}
+
+function sub(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function drawAxes(rgb: Uint8Array, W: number, H: number, S: number, R: Mat3): void {
+  const len = Math.max(10 * S, Math.round(Math.min(W, H) * 0.07));
+  const pad = 10 * S;
+  const ox = pad + len, oy = H - pad - len;
+  const thick = Math.max(1, Math.round(1.3 * S));
+  const axes = [0, 1, 2]
+    .map((k) => ({ k, v: applyMat(R, k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0) }))
+    .sort((a, b) => a.v[2] - b.v[2]); // far axes first
+  for (const { k, v } of axes) {
+    const tx = ox + v[0] * len, ty = oy - v[1] * len;
+    drawLine(rgb, W, H, ox, oy, tx, ty, thick, THEME.axes[k]);
+    const lx = ox + v[0] * (len + 7 * S) - 2.5 * S;
+    const ly = oy - v[1] * (len + 7 * S) - 3.5 * S;
+    drawText(rgb, W, H, 3, lx, ly, "XYZ"[k], S, THEME.axes[k]);
+  }
+}
+
+function drawLine(rgb: Uint8Array, W: number, H: number, x0: number, y0: number, x1: number, y1: number, thick: number, color: RGB): void {
+  const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+  const r = thick / 2;
+  for (let s = 0; s <= steps; s++) {
+    const x = x0 + ((x1 - x0) * s) / steps, y = y0 + ((y1 - y0) * s) / steps;
+    for (let yy = Math.floor(y - r); yy <= Math.ceil(y + r); yy++) {
+      if (yy < 0 || yy >= H) continue;
+      for (let xx = Math.floor(x - r); xx <= Math.ceil(x + r); xx++) {
+        if (xx < 0 || xx >= W || (xx - x) ** 2 + (yy - y) ** 2 > r * r + 0.25) continue;
+        const o = (yy * W + xx) * 3;
+        rgb[o] = color[0]; rgb[o + 1] = color[1]; rgb[o + 2] = color[2];
+      }
+    }
+  }
+}
+
+export function renderMeshPng(mesh: Mesh, opts: RenderOptions): Uint8Array {
+  const img = renderMesh(mesh, opts);
+  return encodePng(img.rgba, img.width, img.height);
 }

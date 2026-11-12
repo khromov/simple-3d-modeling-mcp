@@ -1,77 +1,45 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { computeStats } from "../../src/geometry/stats.js";
 import { ViewerState } from "../../src/viewer/viewer-state.js";
+import { box } from "../helpers/meshes.js";
+
+const mesh = box([0, 0, 0], [1, 1, 1]);
+const input = (title: string, key?: string) => ({ mesh, stats: computeStats(mesh), title, key });
 
 describe("ViewerState", () => {
-  it("starts with no versions", () => {
+  it("starts empty", () => {
     const state = new ViewerState();
     expect(state.versions).toHaveLength(0);
     expect(state.latest).toBeUndefined();
   });
 
-  it("adds a model version", () => {
+  it("adds versions with increasing numbers", () => {
     const state = new ViewerState();
-    const stlBytes = new Uint8Array([1, 2, 3]);
-    const added = state.addVersion(stlBytes, "My Model");
+    const a = state.addVersion(input("A")).entry;
+    const b = state.addVersion(input("B")).entry;
+    expect([a.version, b.version]).toEqual([1, 2]);
+    expect(state.latest).toBe(b);
+    expect(state.getVersion(1)?.title).toBe("A");
+    expect(state.getHistory()).toEqual([
+      { version: 1, title: "A", timestamp: a.timestamp },
+      { version: 2, title: "B", timestamp: b.timestamp },
+    ]);
+  });
 
-    expect(added.version).toBe(1);
-    expect(added.title).toBe("My Model");
-    expect(added.stlBytes).toBe(stlBytes);
-    expect(added.timestamp).toBeGreaterThan(0);
+  it("does not add a duplicate when the same model is pushed again, but updates the title", () => {
+    const state = new ViewerState();
+    state.addVersion(input("Model", "k1"));
+    const again = state.addVersion(input("Phone stand", "k1"));
+    expect(again.added).toBe(false);
     expect(state.versions).toHaveLength(1);
-    expect(state.latest).toBe(added);
+    expect(state.latest?.title).toBe("Phone stand");
+    expect(state.addVersion(input("Other", "k2")).added).toBe(true);
   });
 
-  it("increments version numbers", () => {
-    const state = new ViewerState();
-    const v1 = state.addVersion(new Uint8Array([1]), "Version 1");
-    const v2 = state.addVersion(new Uint8Array([2]), "Version 2");
-    const v3 = state.addVersion(new Uint8Array([3]), "Version 3");
-
-    expect(v1.version).toBe(1);
-    expect(v2.version).toBe(2);
-    expect(v3.version).toBe(3);
-  });
-
-  it("retrieves a specific version", () => {
-    const state = new ViewerState();
-    state.addVersion(new Uint8Array([1]), "First");
-    const v2 = state.addVersion(new Uint8Array([2]), "Second");
-    state.addVersion(new Uint8Array([3]), "Third");
-
-    const found = state.getVersion(2);
-    expect(found).toBe(v2);
-    expect(found?.title).toBe("Second");
-  });
-
-  it("caps at maxVersions and evicts oldest", () => {
+  it("evicts the oldest versions beyond the limit", () => {
     const state = new ViewerState(3);
-    const v1 = state.addVersion(new Uint8Array([1]), "First");
-    state.addVersion(new Uint8Array([2]), "Second");
-    state.addVersion(new Uint8Array([3]), "Third");
-    state.addVersion(new Uint8Array([4]), "Fourth");
-
-    expect(state.versions).toHaveLength(3);
-    expect(state.getVersion(v1.version)).toBeUndefined();
-    expect(state.versions[0].title).toBe("Second");
-    expect(state.versions[2].title).toBe("Fourth");
-  });
-
-  it("returns history metadata without STL bytes", () => {
-    const state = new ViewerState();
-    state.addVersion(new Uint8Array([1, 2, 3]), "Model A");
-    state.addVersion(new Uint8Array([4, 5, 6]), "Model B");
-
-    const history = state.getHistory();
-    expect(history).toHaveLength(2);
-
-    for (const entry of history) {
-      expect(entry).toHaveProperty("version");
-      expect(entry).toHaveProperty("title");
-      expect(entry).toHaveProperty("timestamp");
-      expect(entry).not.toHaveProperty("stlBytes");
-    }
-
-    expect(history[0].title).toBe("Model A");
-    expect(history[1].title).toBe("Model B");
+    for (let i = 0; i < 5; i++) state.addVersion(input(`v${i}`));
+    expect(state.versions.map((v) => v.version)).toEqual([3, 4, 5]);
+    expect(state.getVersion(1)).toBeUndefined();
   });
 });

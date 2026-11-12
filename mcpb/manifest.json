@@ -3,7 +3,8 @@
   "name": "simple-3d-modeling",
   "display_name": "Simple 3D Modeling",
   "version": "1.2.14",
-  "description": "Create, preview, and export 3D models through natural conversation. Zero setup — OpenSCAD engine bundled via WebAssembly.",
+  "description": "Create, preview and export 3D models through conversation. Zero setup — OpenSCAD runs bundled via WebAssembly, with BOSL2 and fonts included.",
+  "long_description": "Write OpenSCAD models with your AI assistant and see them instantly: inline previews with dimensions, labelled multi-view grids, turntable animations and a live 3D viewer in your browser. Export STL, 3MF (with colours), OBJ, AMF, SVG or DXF straight to a folder of your choice. Uses an installed OpenSCAD automatically when it has the fast Manifold backend.",
   "author": {
     "name": "mazzanfar",
     "url": "https://github.com/mazzanfar"
@@ -14,34 +15,60 @@
   },
   "homepage": "https://github.com/mazzanfar/simple-3d-modeling-mcp",
   "support": "https://github.com/mazzanfar/simple-3d-modeling-mcp/issues",
-  "keywords": ["3d-modeling", "openscad", "cad", "stl", "3d-printing"],
+  "keywords": ["3d-modeling", "openscad", "cad", "stl", "3mf", "3d-printing", "bosl2"],
   "license": "GPL-2.0",
   "server": {
     "type": "node",
-    "entry_point": "server/index.js",
+    "entry_point": "server/dist/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/server/index.js"],
-      "env": {}
+      "args": ["${__dirname}/server/dist/index.js"],
+      "env": {
+        "OPENSCAD_OUTPUT_DIR": "${user_config.output_dir}",
+        "OPENSCAD_AUTO_OPEN_VIEWER": "${user_config.auto_open_viewer}",
+        "OPENSCAD_PATH": "${user_config.openscad_path}"
+      }
+    }
+  },
+  "user_config": {
+    "output_dir": {
+      "type": "directory",
+      "title": "Export folder",
+      "description": "Where exported models and saved .scad files go. Leave empty to use your Downloads folder.",
+      "required": false
+    },
+    "auto_open_viewer": {
+      "type": "boolean",
+      "title": "Open the 3D viewer automatically",
+      "description": "Open the interactive browser viewer on the first render.",
+      "required": false,
+      "default": true
+    },
+    "openscad_path": {
+      "type": "file",
+      "title": "OpenSCAD executable (optional)",
+      "description": "Use a specific installed OpenSCAD instead of the bundled engine. Leave empty for automatic selection.",
+      "required": false
     }
   },
   "tools": [
-    { "name": "render", "description": "Render OpenSCAD code to a PNG preview image" },
-    { "name": "render_turntable", "description": "Render a 360° turntable animation" },
-    { "name": "render_multiview", "description": "Render multi-view grid (front, right, top, perspective)" },
-    { "name": "export", "description": "Export to STL, 3MF, AMF, OFF, DXF, SVG" },
-    { "name": "validate", "description": "Syntax-check OpenSCAD code" },
-    { "name": "open_viewer", "description": "Open interactive 3D viewer in browser" },
-    { "name": "cheatsheet", "description": "OpenSCAD language quick-reference" },
-    { "name": "list_libraries", "description": "Discover installed OpenSCAD libraries" },
-    { "name": "get_version", "description": "Check engine info (WASM or native)" },
-    { "name": "read_scad_file", "description": "Read an existing .scad file" }
+    { "name": "render", "description": "Render a PNG preview with size, bounds, volume and echo output" },
+    { "name": "render_multiview", "description": "Labelled grid of orthographic and perspective views" },
+    { "name": "render_turntable", "description": "360° turntable animation" },
+    { "name": "export", "description": "Export STL, 3MF (with colours), OBJ, OFF, AMF, SVG or DXF to disk" },
+    { "name": "validate", "description": "Fast syntax and assert() check" },
+    { "name": "open_viewer", "description": "Open the interactive 3D viewer in the browser" },
+    { "name": "cheatsheet", "description": "OpenSCAD and BOSL2 quick reference" },
+    { "name": "list_libraries", "description": "List bundled and installed OpenSCAD libraries" },
+    { "name": "get_version", "description": "Engine, backend and settings info" },
+    { "name": "read_scad_file", "description": "Read a .scad file" },
+    { "name": "save_scad_file", "description": "Save OpenSCAD source to a .scad file" }
   ],
   "tools_generated": false,
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
-      "node": ">=22.23.4 <23 || >=24.22.1 <25"
+      "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.13.1 <27"
     }
   }
 }

@@ -1,408 +1,56 @@
 #!/usr/bin/env node
 
 /**
- * simple-3d-modeling-mcp v2 — Zero-setup MCP server for LLM-driven 3D modeling.
- * Uses bundled openscad-wasm (no system install needed).
+ * simple-3d-modeling-mcp — zero-setup MCP server for LLM-driven 3D modelling.
+ * Uses bundled OpenSCAD WASM, or a native OpenSCAD when available.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
-import { readFileSync } from "node:fs";
-import { exec } from "node:child_process";
-import { platform } from "node:os";
+import { readConfig } from "./config.js";
+import { createEngine } from "./engine/index.js";
+import { createServer } from "./server.js";
 
-import { createEngine, type Engine } from "./engine/index.js";
-import { NativeEngine } from "./engine/native-engine.js";
-import { OPENSCAD_CHEATSHEET } from "./cheatsheet.js";
-import { ViewerServer } from "./viewer/index.js";
-import { renderMultiView } from "./rendering/multiview.js";
-import { renderTurntable } from "./rendering/turntable.js";
-import { renderStlToPng } from "./rendering/software-renderer.js";
-
-// ---------------------------------------------------------------------------
-// Bootstrap
-// ---------------------------------------------------------------------------
-
-let engine: Engine;
-let viewerServer: ViewerServer;
-let viewerAutoOpened = false;
-
-const server = new McpServer({
-  name: "simple-3d-modeling-mcp",
-  version: "1.2.14",
-});
-
-// ---------------------------------------------------------------------------
-// Helper: push model to viewer if running, auto-open on first render
-// ---------------------------------------------------------------------------
-
-async function pushToViewer(code: string, params?: Record<string, string | number | boolean>, title?: string): Promise<string | undefined> {
-  // Auto-start viewer on first render
-  if (!viewerServer.isRunning && !viewerAutoOpened) {
-    viewerAutoOpened = true;
-    try {
-      const url = await viewerServer.start();
-      const os = platform();
-      const openCmd = os === "darwin" ? `open "${url}"` : os === "win32" ? `start "" "${url}"` : `xdg-open "${url}"`;
-      exec(openCmd, () => {});
-    } catch {
-      // Viewer failed to start — not critical
-    }
-  }
-
-  if (viewerServer.isRunning) {
-    const stl = await engine.exportModel({ code, format: "stl", params });
-    if (stl.success && stl.outputBytes) {
-      viewerServer.pushModel(stl.outputBytes, title ?? "Model");
-      return viewerServer.url ?? undefined;
-    }
-  }
-  return undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Resources
-// ---------------------------------------------------------------------------
-
-server.resource(
-  "cheatsheet",
-  "openscad://cheatsheet",
-  { description: "OpenSCAD language quick-reference" },
-  async () => ({
-    contents: [{ uri: "openscad://cheatsheet", text: OPENSCAD_CHEATSHEET, mimeType: "text/markdown" }],
-  })
-);
-
-// ---------------------------------------------------------------------------
-// Tools
-// ---------------------------------------------------------------------------
-
-// 1. render
-server.tool(
-  "render",
-  "Render OpenSCAD code to a preview image. Returns the image inline. Also updates the live 3D viewer if open.",
-  {
-    code: z.string().describe("OpenSCAD source code to render"),
-    view: z.string().optional().describe("Camera position: 'translateX,translateY,translateZ,rotX,rotY,rotZ,distance'"),
-    width: z.number().optional().default(1024).describe("Image width in pixels"),
-    height: z.number().optional().default(768).describe("Image height in pixels"),
-    params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("OpenSCAD variable overrides"),
-    colorscheme: z.string().optional().default("Tomorrow Night").describe("Color scheme name"),
-  },
-  async ({ code, view, width, height, params, colorscheme }) => {
-    const w = width ?? 1024;
-    const h = height ?? 768;
-
-    // Always push to viewer first (STL export works even when PNG doesn't)
-    const viewerUrl = await pushToViewer(code, params);
-
-    // Try native PNG render
-    const result = await engine.renderPng({
-      code, camera: view, imageSize: [w, h], params, colorscheme,
-    });
-
-    let imageBytes: Uint8Array | undefined = result.outputBytes;
-    let usedFallback = false;
-
-    // Fallback: software render from STL when WASM can't produce PNG
-    if (!imageBytes) {
-      const stl = await engine.exportModel({ code, format: "stl", params });
-      if (stl.success && stl.outputBytes) {
-        imageBytes = await renderStlToPng({ stlBytes: stl.outputBytes, width: w, height: h, camera: view });
-        usedFallback = true;
-      }
-    }
-
-    if (!imageBytes) {
-      return {
-        content: [{ type: "text", text: `Render failed.\n\n${result.errors.join("\n") || result.stderr}` }],
-        isError: true,
-      };
-    }
-
-    const parts: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
-      { type: "image" as const, data: Buffer.from(imageBytes).toString("base64"), mimeType: "image/png" },
-    ];
-
-    // Only show warnings from the native engine — suppress WASM fallback noise
-    if (!usedFallback && result.warnings.length > 0) {
-      parts.push({ type: "text" as const, text: `Warnings:\n${result.warnings.join("\n")}` });
-    }
-    if (viewerUrl) {
-      parts.push({ type: "text" as const, text: `Interactive viewer: ${viewerUrl}` });
-    }
-
-    return { content: parts };
-  }
-);
-
-// 2. render_turntable
-server.tool(
-  "render_turntable",
-  "Render a 360° turntable animation of the model. Returns an animated image (APNG) inline.",
-  {
-    code: z.string().describe("OpenSCAD source code"),
-    frames: z.number().optional().default(24).describe("Number of frames (default 24)"),
-    width: z.number().optional().default(512).describe("Image width"),
-    height: z.number().optional().default(512).describe("Image height"),
-    params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  },
-  async ({ code, frames, width, height, params }) => {
-    // Always push to viewer
-    await pushToViewer(code, params);
-
-    const result = await renderTurntable(engine, {
-      code, frames: frames ?? 24, size: [width ?? 512, height ?? 512], params,
-    });
-
-    if (!result.success || !result.outputBytes) {
-      return {
-        content: [{ type: "text", text: `Turntable render failed.\n\n${result.errors.join("\n")}` }],
-        isError: true,
-      };
-    }
-
-    return {
-      content: [{
-        type: "image" as const,
-        data: Buffer.from(result.outputBytes).toString("base64"),
-        mimeType: "image/png",
-      }],
-    };
-  }
-);
-
-// 3. render_multiview
-server.tool(
-  "render_multiview",
-  "Render multiple views of the model in a single grid image (front, right, top, perspective).",
-  {
-    code: z.string().describe("OpenSCAD source code"),
-    views: z.array(z.string()).optional().default(["front", "right", "top", "perspective"]).describe("View names"),
-    width: z.number().optional().default(512).describe("Per-cell width"),
-    height: z.number().optional().default(512).describe("Per-cell height"),
-    params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  },
-  async ({ code, views, width, height, params }) => {
-    // Always push to viewer
-    await pushToViewer(code, params);
-
-    const result = await renderMultiView(engine, {
-      code, views: views ?? ["front", "right", "top", "perspective"],
-      cellSize: [width ?? 512, height ?? 512], params,
-    });
-
-    if (!result.success || !result.outputBytes) {
-      return {
-        content: [{ type: "text", text: `Multi-view render failed.\n\n${result.errors.join("\n")}` }],
-        isError: true,
-      };
-    }
-
-    return {
-      content: [{
-        type: "image" as const,
-        data: Buffer.from(result.outputBytes).toString("base64"),
-        mimeType: "image/png",
-      }],
-    };
-  }
-);
-
-// 4. export
-server.tool(
-  "export",
-  "Export OpenSCAD code to a 3D file (STL, 3MF, AMF, etc.). Returns the file path.",
-  {
-    code: z.string().describe("OpenSCAD source code"),
-    format: z.string().optional().default("stl").describe("Output format: stl, 3mf, amf, off, dxf, svg"),
-    filename: z.string().optional().describe("Output filename"),
-    params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  },
-  async ({ code, format, filename, params }) => {
-    const result = await engine.exportModel({ code, format, filename, params });
-
-    if (!result.success) {
-      return {
-        content: [{ type: "text", text: `Export failed.\n\n${result.errors.join("\n") || result.stderr}` }],
-        isError: true,
-      };
-    }
-
-    const size = result.outputBytes ? (result.outputBytes.length / 1024).toFixed(1) + " KB" : "unknown size";
-    const outputName = filename ?? `model.${format ?? "stl"}`;
-
-    const parts: Array<{ type: "text"; text: string } | { type: "resource"; resource: { uri: string; mimeType: string; blob: string } }> = [];
-
-    // Return the file as an embedded resource so sandboxed clients can access it
-    if (result.outputBytes) {
-      parts.push({
-        type: "resource" as const,
-        resource: {
-          uri: `file:///${outputName}`,
-          mimeType: "application/octet-stream",
-          blob: Buffer.from(result.outputBytes).toString("base64"),
-        },
-      });
-    }
-
-    let msg = `Exported ${outputName} (${size})`;
-    if (result.outputPath) msg += `\nAlso saved to: ${result.outputPath}`;
-    if (result.warnings.length > 0) msg += `\n\nWarnings:\n${result.warnings.join("\n")}`;
-    parts.push({ type: "text" as const, text: msg });
-
-    return { content: parts };
-  }
-);
-
-// 5. validate
-server.tool(
-  "validate",
-  "Check OpenSCAD code for syntax errors without full rendering. Fast.",
-  { code: z.string().describe("OpenSCAD source code to validate") },
-  async ({ code }) => {
-    const result = await engine.validate(code);
-
-    if (!result.valid) {
-      return {
-        content: [{ type: "text", text: `Validation found errors:\n${result.errors.join("\n")}` }],
-        isError: true,
-      };
-    }
-
-    let msg = "Code is valid — no syntax errors detected.";
-    if (result.warnings.length > 0) msg += `\n\nWarnings:\n${result.warnings.join("\n")}`;
-    return { content: [{ type: "text", text: msg }] };
-  }
-);
-
-// 6. open_viewer
-server.tool(
-  "open_viewer",
-  "Open the interactive 3D viewer in the browser. Shows the most recently rendered model with rotate/zoom/pan controls.",
-  {},
-  async () => {
-    const url = await viewerServer.start();
-
-    const os = platform();
-    const openCmd = os === "darwin" ? `open "${url}"` : os === "win32" ? `start "" "${url}"` : `xdg-open "${url}"`;
-    exec(openCmd, (err) => {
-      if (err) console.error("Could not open browser:", err.message);
-    });
-
-    return {
-      content: [{
-        type: "text",
-        text: `Interactive 3D viewer opened.\n\n${url}\n\nControls: drag to rotate, scroll to zoom, right-drag to pan.\nThe viewer auto-updates on each render.`,
-      }],
-    };
-  }
-);
-
-// 7. cheatsheet (tool version — some clients don't support resources)
-server.tool(
-  "cheatsheet",
-  "Get an OpenSCAD language cheatsheet with primitives, transformations, and tips.",
-  {},
-  async () => ({ content: [{ type: "text", text: OPENSCAD_CHEATSHEET }] })
-);
-
-// 8. list_libraries
-server.tool(
-  "list_libraries",
-  "List installed OpenSCAD libraries. Note: libraries only work with native OpenSCAD, not the bundled WASM engine.",
-  {},
-  async () => {
-    if (engine.name !== "native") {
-      return {
-        content: [{
-          type: "text",
-          text: "Libraries are only available when native OpenSCAD is installed.\nThe WASM engine supports built-in primitives only.\n\nInstall OpenSCAD from https://openscad.org/downloads.html to use libraries like BOSL2 and MCAD.",
-        }],
-      };
-    }
-
-    const libs = (engine as NativeEngine).listLibraries();
-    const entries = Object.entries(libs);
-    if (entries.length === 0) {
-      return {
-        content: [{
-          type: "text",
-          text: "No OpenSCAD libraries found.\n\nLibrary paths:\n" + (engine as NativeEngine).libraryPaths().join("\n") +
-            "\n\nPopular libraries:\n- BOSL2: https://github.com/BelfrySCAD/BOSL2\n- MCAD: https://github.com/openscad/MCAD",
-        }],
-      };
-    }
-
-    let text = `Found ${entries.length} libraries:\n\n`;
-    for (const [name, files] of entries) {
-      text += `## ${name}\n` + files.map((f) => `  - ${f}`).join("\n") + "\n\n";
-    }
-    return { content: [{ type: "text", text }] };
-  }
-);
-
-// 9. get_version
-server.tool(
-  "get_version",
-  "Check the OpenSCAD engine info (WASM or native).",
-  {},
-  async () => {
-    const ver = await engine.version();
-    return {
-      content: [{
-        type: "text",
-        text: `Engine: ${engine.name}\nVersion: ${ver}\nWork directory: ${engine.workDir}`,
-      }],
-    };
-  }
-);
-
-// 10. read_scad_file
-server.tool(
-  "read_scad_file",
-  "Read an OpenSCAD (.scad) file from disk.",
-  { path: z.string().describe("Absolute path to the .scad file") },
-  async ({ path }) => {
-    try {
-      const content = readFileSync(path, "utf-8");
-      return { content: [{ type: "text", text: content }] };
-    } catch (e: any) {
-      return { content: [{ type: "text", text: `Failed to read file: ${e.message}` }], isError: true };
-    }
-  }
-);
-
-// ---------------------------------------------------------------------------
-// Start
-// ---------------------------------------------------------------------------
+const log = (message: string) => console.error(`[simple-3d-modeling-mcp] ${message}`);
 
 async function main() {
-  engine = await createEngine({
-    executablePath: process.env.OPENSCAD_PATH || undefined,
-    workDir: process.env.OPENSCAD_WORK_DIR || undefined,
-  });
-  viewerServer = new ViewerServer();
+  const { config, warnings } = readConfig();
+  warnings.forEach(log);
 
-  // Clean up viewer server on exit
-  process.on("beforeExit", async () => {
-    if (viewerServer.isRunning) await viewerServer.stop();
+  const notes = [...warnings];
+  const engine = createEngine({
+    mode: config.engineMode,
+    executablePath: config.openscadPath,
+    workDir: config.workDir,
+    timeoutMs: config.timeoutMs,
+    log: (message) => {
+      notes.push(message);
+      log(message);
+    },
   });
-  process.on("SIGINT", async () => {
-    if (viewerServer.isRunning) await viewerServer.stop();
-    process.exit(0);
-  });
-  process.on("SIGTERM", async () => {
-    if (viewerServer.isRunning) await viewerServer.stop();
-    process.exit(0);
+  engine.then((e) => log(`using the ${e.name} engine`)).catch(() => {});
+
+  const app = createServer({
+    engine,
+    outputDir: config.outputDir,
+    autoOpenViewer: config.autoOpenViewer,
+    notes,
   });
 
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  let closing = false;
+  const shutdown = async (code: number) => {
+    if (closing) return;
+    closing = true;
+    await app.close().catch(() => {});
+    process.exit(code);
+  };
+  process.on("SIGINT", () => void shutdown(0));
+  process.on("SIGTERM", () => void shutdown(0));
+  process.stdin.on("close", () => void shutdown(0));
+
+  await app.server.connect(new StdioServerTransport());
 }
 
 main().catch((err) => {
-  console.error("Fatal:", err);
+  log(`fatal: ${err?.stack ?? err}`);
   process.exit(1);
 });

@@ -1,8 +1,15 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Build .mcpb Desktop Extension for Claude Desktop
+# Build the .mcpb Desktop Extension for Claude Desktop.
 # Usage: ./scripts/build-mcpb.sh
+#
+# Bundle layout (mirrors the npm package so runtime path lookups are identical):
+#   manifest.json
+#   server/package.json
+#   server/dist/…            compiled server
+#   server/assets/…          fonts + BOSL2 for the WASM engine
+#   server/node_modules/…    production dependencies
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -12,41 +19,34 @@ OUTPUT="$PROJECT_DIR/simple-3d-modeling.mcpb"
 
 echo "=== Building .mcpb Desktop Extension ==="
 
-# Clean previous build
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/server"
 
-# 1. Build TypeScript
-echo "→ Compiling TypeScript..."
+echo "→ Compiling TypeScript (and fetching assets)..."
 cd "$PROJECT_DIR"
 npm run build
 
-# 2. Copy compiled server code
 echo "→ Copying server files..."
-cp -r "$PROJECT_DIR/dist/"* "$BUILD_DIR/server/"
+cp -r "$PROJECT_DIR/dist" "$BUILD_DIR/server/dist"
+cp -r "$PROJECT_DIR/assets" "$BUILD_DIR/server/assets"
+cp "$PROJECT_DIR/package.json" "$PROJECT_DIR/package-lock.json" "$PROJECT_DIR/LICENSE" "$BUILD_DIR/server/"
 
-# 3. Install production dependencies into build dir
 echo "→ Installing production dependencies..."
-cp "$PROJECT_DIR/package.json" "$PROJECT_DIR/package-lock.json" "$BUILD_DIR/server/"
 cd "$BUILD_DIR/server"
-npm ci --omit=dev
+npm ci --omit=dev --ignore-scripts
 cd "$PROJECT_DIR"
 
-# 4. Copy manifest
-echo "→ Copying manifest..."
-# Update version from package.json
-VERSION=$(node -e "console.log(require('./package.json').version)")
+echo "→ Writing manifest..."
+VERSION=$(node -p "require('./package.json').version")
 node -e "
 const m = require('$MCPB_DIR/manifest.json');
 m.version = '$VERSION';
-process.stdout.write(JSON.stringify(m, null, 2));
+process.stdout.write(JSON.stringify(m, null, 2) + '\n');
 " > "$BUILD_DIR/manifest.json"
 
-# 5. Pack with mcpb CLI
 echo "→ Packing .mcpb bundle..."
-npx @anthropic-ai/mcpb pack "$BUILD_DIR" "$OUTPUT"
+npx --yes @anthropic-ai/mcpb pack "$BUILD_DIR" "$OUTPUT"
 
-# 6. Clean up
 rm -rf "$BUILD_DIR"
 
 echo ""

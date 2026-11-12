@@ -1,7 +1,7 @@
 {
   "name": "simple-3d-modeling-mcp",
   "version": "1.2.14",
-  "description": "MCP server that connects Claude (and other AI assistants) to OpenSCAD for 3D modeling",
+  "description": "MCP server that lets Claude and other AI assistants create, preview and export 3D models with OpenSCAD — zero setup (bundled WASM), BOSL2 included",
   "type": "module",
   "bin": {
     "simple-3d-modeling-mcp": "dist/index.js"
@@ -9,13 +9,19 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "assets"
   ],
   "scripts": {
+    "assets": "node scripts/fetch-assets.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prebuild": "npm run clean && npm run assets",
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "prepublishOnly": "npm run build",
+    "pretest": "npm run assets",
     "test": "vitest run",
     "test:watch": "vitest",
     "build:mcpb": "bash scripts/build-mcpb.sh"
@@ -27,30 +33,33 @@
     "cad",
     "model-context-protocol",
     "claude",
-    "ai"
+    "ai",
+    "bosl2",
+    "3d-printing",
+    "stl",
+    "3mf"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/mazzanfar/simple-3d-modeling-mcp"
+    "url": "git+https://github.com/mazzanfar/simple-3d-modeling-mcp.git"
   },
   "author": "mazzanfar",
   "license": "GPL-2.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "openscad-wasm": "^0.0.4",
-    "three": "^0.183.2",
-    "upng-js": "^2.1.0",
-    "ws": "^8.21.0",
-    "zod": "^4.3.6"
+    "ws": "^8.22.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "@types/three": "^0.183.1",
-    "@types/ws": "^8.18.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.12"
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "dejavu-fonts-ttf": "^2.37.3",
+    "three": "^0.187.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
   },
   "engines": {
-    "node": ">=22.23.4 <23 || >=24.22.1 <25"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.13.1 <27"
   }
 }
