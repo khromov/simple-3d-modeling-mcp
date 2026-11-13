@@ -3,7 +3,7 @@ name: Dev container
 on:
   pull_request:
     paths:
-      - ".devcontainer/devcontainer.json"
+      - ".devcontainer/**"
       - ".github/workflows/devcontainer.yml"
       - "package.json"
       - "package-lock.json"
@@ -47,3 +47,9 @@ jobs:
 
       - name: MCP stdio smoke test
         run: devcontainer exec --workspace-folder . node scripts/capture-mcp-traffic.mjs /tmp/mcp-traffic.json
+
+      - name: MCP stdio smoke test (server running under Bun)
+        run: devcontainer exec --workspace-folder . bun scripts/capture-mcp-traffic.mjs /tmp/mcp-traffic-bun.json
+
+      - name: Build the .mcpb bundle
+        run: devcontainer exec --workspace-folder . npm run build:mcpb
