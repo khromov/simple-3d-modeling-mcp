@@ -114,6 +114,12 @@ describe("MCP server", () => {
     expect(textOf(r)).toMatch(/Can't find include file 'MCAD\/boxes\.scad'[\s\S]*Hint: Relative paths only resolve when rendering with `file`\. Bundled libraries: BOSL2/);
   });
 
+  it("reports bad parameter names as input errors", async () => {
+    const r = await call("render", { code: "cube(1);", params: { "bad-name": 1 } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe('Invalid parameter name "bad-name" (must be an OpenSCAD identifier)');
+  });
+
   it("validates inputs", async () => {
     expect(textOf(await call("render", { code: "cube(1);", view: "sideways" }))).toMatch(/Invalid view/);
     expect(textOf(await call("render", {}))).toMatch(/Provide OpenSCAD source/);

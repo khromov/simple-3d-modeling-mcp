@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { UserError } from "../../src/errors.js";
 import { formatLog, parseLog, rewritePaths } from "../../src/engine/output.js";
 import { paramArgs, stableParams } from "../../src/engine/params.js";
 import { collectDependencies, prepareSource, resolveScadPath } from "../../src/engine/source.js";
@@ -55,6 +56,9 @@ describe("paramArgs", () => {
   it("rejects names that are not identifiers and non-finite numbers", () => {
     expect(() => paramArgs({ "x=1;cube(9)": 1 })).toThrow(/Invalid parameter name/);
     expect(() => paramArgs({ x: Infinity })).toThrow(/finite/);
+    // Bad params are the caller's mistake: the tools show UserError messages as-is.
+    expect(() => paramArgs({ "bad-name": 1 })).toThrow(UserError);
+    expect(() => paramArgs({ x: NaN })).toThrow(UserError);
     expect(paramArgs({ $fn: 64 })).toEqual(["-D", "$fn=64"]);
   });
 
