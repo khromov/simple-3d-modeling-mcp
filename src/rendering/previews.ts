@@ -7,7 +7,7 @@
 import type { Mesh } from "../geometry/mesh.js";
 import { drawText } from "./bitmap-font.js";
 import { defaultProjection, PRESET_VIEWS, turntableAngles, type PresetView, type Projection } from "./camera.js";
-import { encodeApng, encodePng } from "./png.js";
+import { ApngWriter, encodePng } from "./png.js";
 import { meshBounds, renderMesh, THEME, type RenderedImage } from "./software-renderer.js";
 
 export function gridColumns(n: number): number {
@@ -71,13 +71,37 @@ export interface TurntableOptions {
   elevation?: number;
   /** Duration of one revolution in ms (default 2400). */
   durationMs?: number;
+  /** Stop with a TurntableTooLargeError as soon as the file grows past this many bytes. */
+  maxBytes?: number;
+}
+
+/** The turntable outgrew `maxBytes`; rendering stopped there. */
+export class TurntableTooLargeError extends Error {
+  constructor(
+    /** Frames rendered before stopping. */
+    readonly framesRendered: number,
+    /** Average size of those frames, in bytes. */
+    readonly bytesPerFrame: number,
+    /** Size of the whole file, estimated from that average. */
+    readonly estimatedBytes: number,
+  ) {
+    super(`The turntable would be about ${estimatedBytes} bytes.`);
+    this.name = "TurntableTooLargeError";
+  }
 }
 
 /** Turntable APNG rendered from the mesh (constant framing across frames). */
 export function renderTurntable(mesh: Mesh, opts: TurntableOptions): Uint8Array {
   const { center, radius } = meshBounds(mesh);
-  const frames = turntableAngles(opts.frames, opts.elevation ?? 55).map(
-    (rot) => renderMesh(mesh, { width: opts.width, height: opts.height, camera: { kind: "fit", rot }, sphere: { center, radius }, margin: 0.92 }).rgba,
-  );
-  return encodeApng(frames, opts.width, opts.height, (opts.durationMs ?? 2400) / opts.frames);
+  const writer = new ApngWriter(opts.width, opts.height, opts.frames, (opts.durationMs ?? 2400) / opts.frames);
+  const start = writer.size;
+  for (const rot of turntableAngles(opts.frames, opts.elevation ?? 55)) {
+    const frame = renderMesh(mesh, { width: opts.width, height: opts.height, camera: { kind: "fit", rot }, sphere: { center, radius }, margin: 0.92 });
+    writer.addFrame(frame.rgba);
+    if (opts.maxBytes !== undefined && writer.size > opts.maxBytes) {
+      const perFrame = (writer.size - start) / writer.frames;
+      throw new TurntableTooLargeError(writer.frames, Math.round(perFrame), Math.round(start + perFrame * opts.frames));
+    }
+  }
+  return writer.finish();
 }

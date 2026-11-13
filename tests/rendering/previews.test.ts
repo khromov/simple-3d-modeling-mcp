@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decodePng, encodeApng, encodePng } from "../../src/rendering/png.js";
-import { composeGrid, renderMultiView, renderTurntable } from "../../src/rendering/previews.js";
+import { ApngWriter, decodePng, encodeApng, encodePng } from "../../src/rendering/png.js";
+import { composeGrid, renderMultiView, renderTurntable, TurntableTooLargeError } from "../../src/rendering/previews.js";
 import { bboxOf, centroid, type Pred } from "../helpers/image.js";
 import { box, lShape, merge } from "../helpers/meshes.js";
 
@@ -17,6 +17,19 @@ describe("PNG codec", () => {
     expect(apng.includes(Buffer.from("acTL"))).toBe(true);
     expect(apng.readUInt32BE(apng.indexOf("acTL") + 4)).toBe(3);
     expect(decodePng(apng).width).toBe(5); // first frame is a normal PNG
+  });
+
+  it("streams APNG frames and reports the file size as it grows", () => {
+    const rgba = new Uint8Array(5 * 3 * 4).map((_, i) => (i % 4 === 3 ? 255 : (i * 37) % 256));
+    const writer = new ApngWriter(5, 3, 2, 100);
+    writer.addFrame(rgba);
+    const afterOne = writer.size;
+    writer.addFrame(rgba);
+    expect(writer.size).toBeGreaterThan(afterOne);
+    const bytes = writer.finish();
+    expect(bytes.length).toBe(writer.size);
+    expect(Buffer.from(bytes).equals(Buffer.from(encodeApng([rgba, rgba], 5, 3, 100)))).toBe(true);
+    expect(() => new ApngWriter(5, 3, 2, 100).finish()).toThrow(/0 of its 2 frames/);
   });
 });
 
@@ -42,6 +55,22 @@ describe("previews", () => {
     expect(bboxOf(above, red).count).toBeGreaterThan(bboxOf(below, red).count); // the red top face, from above
     expect(bboxOf(below, blue).count).toBeGreaterThan(bboxOf(above, blue).count); // the blue bottom face, from below
     expect(centroid(below, red).y).toBeLessThan(centroid(below, blue).y); // still the right way up
+  });
+
+  it("stops as soon as a turntable passes maxBytes, with a size estimate", () => {
+    const opts = { frames: 24, width: 128, height: 128 };
+    let error: unknown;
+    try {
+      renderTurntable(lShape(), { ...opts, maxBytes: 20_000 });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(TurntableTooLargeError);
+    const { framesRendered, estimatedBytes } = error as TurntableTooLargeError;
+    expect(framesRendered).toBeLessThan(opts.frames);
+    const full = renderTurntable(lShape(), opts).length;
+    expect(full).toBeGreaterThan(20_000);
+    expect(Math.abs(estimatedBytes - full) / full).toBeLessThan(0.25);
   });
 
   it("renders a turntable APNG with the requested frame count", () => {

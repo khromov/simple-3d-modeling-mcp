@@ -146,6 +146,18 @@ describe("MCP server", () => {
     expect((await call("render_turntable", { ...small, elevation: -55 })).isError).toBe(true);
   });
 
+  it("stops a turntable that would be too large, and says how many frames fit", async () => {
+    // 1,600 blocks in scattered colours compress badly: about 200 KB per 1024 px frame.
+    const code =
+      "for (i = [0:39], j = [0:39]) color([((i * 37 + j * 11) % 17) / 16, ((i * 13 + j * 29) % 19) / 18, ((i * 7 + j * 23) % 13) / 12])" +
+      " translate([i * 1.5, j * 1.5, 0]) cube([1.2, 1.2, 1 + (i * 7 + j * 13) % 9]);";
+    const r = await call("render_turntable", { code, frames: 72, width: 1024, height: 1024 });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(
+      /^A 72-frame 1024×1024 turntable of this model would be about [\d.]+ MB, over the 2 MB limit for inline images \(stopped after \d+ frames\)\. Use \d+ frames or fewer at 1024×1024, or a smaller width\/height\.$/,
+    );
+  });
+
   it("rejects cameras without a direction", async () => {
     const r = await call("render", { code: "cube(1);", view: "1,1,1,1,1,1" });
     expect(r.isError).toBe(true);

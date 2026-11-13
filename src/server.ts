@@ -23,7 +23,7 @@ import { write3mf, writeBinaryStl, writeObj, writeOff } from "./geometry/writers
 import { ModelService, type Model } from "./model-service.js";
 import { bundledLibraries, bundledLibraryVersion, PACKAGE_NAME, PACKAGE_VERSION } from "./paths.js";
 import { parseView, resolvePreset, VIEW_HELP, VIEW_NAMES, type PresetView } from "./rendering/camera.js";
-import { renderMultiView, renderTurntable } from "./rendering/previews.js";
+import { renderMultiView, renderTurntable, TurntableTooLargeError } from "./rendering/previews.js";
 import { renderMeshPng } from "./rendering/software-renderer.js";
 import { ViewerServer } from "./viewer/index.js";
 
@@ -379,12 +379,21 @@ export function createServer(opts: CreateServerOptions): AppServer {
       if (!outcome.ok) return failure("Turntable render failed.", outcome.log);
       const { model } = outcome;
       const viewerUrl = await publish(model, src, args.title, args.params);
-      const apng = renderTurntable(model.mesh, {
-        frames: args.frames ?? 24,
-        width: args.width ?? 512,
-        height: args.height ?? 512,
-        elevation: args.elevation ?? 55,
-      });
+      const frames = args.frames ?? 24, width = args.width ?? 512, height = args.height ?? 512;
+      let apng: Uint8Array;
+      try {
+        apng = renderTurntable(model.mesh, { frames, width, height, elevation: args.elevation ?? 55, maxBytes: MAX_INLINE_BYTES });
+      } catch (e) {
+        if (!(e instanceof TurntableTooLargeError)) throw e;
+        // Stopped as soon as it passed the limit. Suggest a frame count from the frames rendered so far,
+        // with 10% to spare: frames from other angles can be larger.
+        const fixedBytes = e.estimatedBytes - e.bytesPerFrame * frames;
+        const fit = Math.floor((0.9 * MAX_INLINE_BYTES - fixedBytes) / e.bytesPerFrame);
+        const advice = fit >= 4 ? `Use ${fit} frames or fewer at ${width}×${height}, or a smaller width/height.` : "Use a smaller width/height.";
+        throw new UserError(
+          `A ${frames}-frame ${width}×${height} turntable of this model would be about ${(e.estimatedBytes / 1024 / 1024).toFixed(1)} MB, over the ${MAX_INLINE_MB} MB limit for inline images (stopped after ${e.framesRendered} frames). ${advice}`,
+        );
+      }
       return {
         content: [image(apng), text(summary(model, outcome.cached, [viewerUrl ? `Interactive viewer: ${viewerUrl}` : ""]))],
       };
