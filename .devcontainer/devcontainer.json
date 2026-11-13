@@ -1,0 +1,33 @@
+// Dev container for Sketchpad 3D. OpenSCAD runs as bundled WebAssembly, so the
+// only toolchain needed is Node (plus Bun, which CI also tests against).
+// See "Dev container" in README.md.
+{
+  "name": "Sketchpad 3D",
+  // Node 22 matches .nvmrc and the oldest Node line in package.json "engines".
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:5-22-trixie",
+  "features": {
+    // Latest Bun, as in CI's test-bun job (`bun --bun vitest run`).
+    "ghcr.io/shyim/devcontainers-features/bun:0": {}
+  },
+  // Installs dependencies, downloads assets/ (OpenSCAD WASM, BOSL2, fonts),
+  // builds the viewer page and compiles dist/, so `npm test` and the MCP server
+  // (`node dist/index.js`) work straight away. Needs network on first create.
+  "postCreateCommand": "npm ci && npm run build",
+  "forwardPorts": [5173],
+  "portsAttributes": {
+    "5173": { "label": "Viewer dev server (npm run dev:viewer)", "onAutoForward": "notify" }
+  },
+  // The live viewer started by the MCP server listens on a random 127.0.0.1 port.
+  "otherPortsAttributes": { "onAutoForward": "notify" },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "svelte.svelte-vscode",
+        "vitest.explorer",
+        "Antyos.openscad",
+        "TypeScriptTeam.native-preview",
+        "github.vscode-github-actions"
+      ]
+    }
+  }
+}
