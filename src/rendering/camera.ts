@@ -106,8 +106,10 @@ export function gimbalMatrix(rot: Readonly<Vec3>): Mat3 {
 /** Model → eye rotation for a camera at `eye` looking at `center`, Z up. */
 export function lookAtMatrix(eye: Readonly<Vec3>, center: Readonly<Vec3>): Mat3 {
   const f = normalize([center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]]);
-  let up: Vec3 = [0, 0, 1];
-  if (Math.abs(f[2]) > 0.999) up = [0, 1, 0];
+  // +Z stays up however close to vertical the view is, as in OpenSCAD's own
+  // look-at, so the image never flips as the eye moves. Only an exactly
+  // vertical view needs another up vector: +Y, as in the top view.
+  const up: Vec3 = Math.hypot(f[0], f[1]) < 1e-12 ? [0, 1, 0] : [0, 0, 1];
   const r = normalize(cross(f, up));
   const u = cross(r, f);
   return [r[0], r[1], r[2], u[0], u[1], u[2], -f[0], -f[1], -f[2]];

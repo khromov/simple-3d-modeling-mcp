@@ -64,6 +64,15 @@ describe("gimbalMatrix (OpenSCAD conventions)", () => {
     expect(round(applyMat(m, 0, 0, 1))).toEqual([0, 1, 0]);
     expect(round(applyMat(m, 0, 1, 0))).toEqual([0, 0, -1]);
   });
+
+  it("keeps a vector camera steady close to straight down", () => {
+    // 7 mm and 9 mm off-axis, 185 mm up: the image used to flip 180° between the two.
+    const screenUp = (eyeY: number) => lookAtMatrix([0, eyeY, 185], [0, 0, 0]).slice(3, 6);
+    const [a, b] = [screenUp(7), screenUp(9)];
+    expect(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).toBeGreaterThan(0.999);
+    // Exactly straight down still shows +Y up, as the top view does.
+    expect(round(applyMat(lookAtMatrix([0, 0, 50], [0, 0, 0]), 0, 1, 0))).toEqual([0, 1, 0]);
+  });
 });
 
 describe("turntableAngles", () => {
