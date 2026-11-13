@@ -66,6 +66,15 @@ const RAD = Math.PI / 180;
 const CREASE_COS = Math.cos(35 * RAD);
 /** Planes closer than this to parallel with the view ray (|cos| of the angle) are skipped by the step test. */
 const GRAZING_COS = 0.05;
+/**
+ * Darkest a face colour's brightest channel may be before shading. Darker
+ * colours (black, navy) are lifted to it, keeping their hue, so their faces
+ * stay distinguishable from each other and from the dark background.
+ */
+const MIN_FACE_VALUE = 96;
+/** Outline pixels darker than this are drawn light, not dark, so edges stay visible on dark parts. */
+const DARK_EDGE_VALUE = 72;
+const LIGHT_EDGE: RGB = [190, 190, 205];
 const L1 = norm3(-0.4, 0.55, 0.75);
 const L2 = norm3(0.55, -0.35, 0.45);
 const HALF = norm3(L1[0], L1[1], L1[2] + 1);
@@ -225,6 +234,8 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     if (colors && !isDefaultColor(colors[t * 4], colors[t * 4 + 1], colors[t * 4 + 2])) {
       r = colors[t * 4]; g = colors[t * 4 + 1]; bl = colors[t * 4 + 2];
     }
+    const lift = MIN_FACE_VALUE - Math.max(r, g, bl);
+    if (lift > 0) { r += lift; g += lift; bl += lift; }
     const d1 = Math.max(0, nx * L1[0] + ny * L1[1] + nz * L1[2]);
     const d2 = Math.max(0, nx * L2[0] + ny * L2[1] + nz * L2[2]);
     const sp = 0.22 * Math.pow(Math.max(0, nx * HALF[0] + ny * HALF[1] + nz * HALF[2]), 32) * 255;
@@ -335,7 +346,11 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     for (let i = 0; i < W * H; i++) {
       if (!mask[i]) continue;
       const o = i * 3;
-      rgb[o] = rgb[o] * 0.4; rgb[o + 1] = rgb[o + 1] * 0.4; rgb[o + 2] = rgb[o + 2] * 0.4;
+      if (Math.max(rgb[o], rgb[o + 1], rgb[o + 2]) < DARK_EDGE_VALUE) {
+        for (let k = 0; k < 3; k++) rgb[o + k] = (rgb[o + k] + LIGHT_EDGE[k]) / 2;
+      } else {
+        rgb[o] = rgb[o] * 0.4; rgb[o + 1] = rgb[o + 1] * 0.4; rgb[o + 2] = rgb[o + 2] * 0.4;
+      }
     }
   }
 

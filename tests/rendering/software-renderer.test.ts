@@ -48,6 +48,39 @@ describe("software renderer outlines", () => {
   });
 });
 
+const luminance = (d: Uint8Array, i: number) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+
+describe("software renderer dark colours", () => {
+  const BACKGROUND = luminance(Uint8Array.from(THEME.background), 0);
+  /** Luminance of every model pixel, and how many outline pixels are lighter than the face under them. */
+  function faces(color: [number, number, number]) {
+    const plain = renderMesh(box([0, 0, 0], [10, 10, 10], color), { ...SIZE, axes: false, edges: false });
+    const lined = renderMesh(box([0, 0, 0], [10, 10, 10], color), { ...SIZE, axes: false });
+    let min = Infinity, max = -Infinity, lighterEdges = 0;
+    for (let i = 0; i < plain.rgba.length; i += 4) {
+      if (!notBackground(plain.rgba[i], plain.rgba[i + 1], plain.rgba[i + 2])) continue;
+      const l = luminance(plain.rgba, i);
+      min = Math.min(min, l); max = Math.max(max, l);
+      if (luminance(lined.rgba, i) > l + 10) lighterEdges++;
+    }
+    return { min, max, lighterEdges };
+  }
+
+  it("keeps black faces apart from each other and from the background", () => {
+    // Black used to render at luminance 0–12, below the background, with outlines that vanished.
+    const black = faces([0, 0, 0]);
+    expect(black.min).toBeGreaterThan(BACKGROUND + 10);
+    expect(black.max - black.min).toBeGreaterThan(30);
+    expect(black.lighterEdges).toBeGreaterThan(100);
+  });
+
+  it("keeps the faces of a dark navy part distinguishable", () => {
+    // Its three faces used to be within 2 levels of each other.
+    const navy = faces([38, 38, 77]);
+    expect(navy.max - navy.min).toBeGreaterThan(10);
+  });
+});
+
 describe("software renderer orientation", () => {
   const mesh = lShape(); // red bar along X, blue 30 mm tower at +X, nub along +Y at -X
 
