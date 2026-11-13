@@ -129,6 +129,10 @@ describe("WasmEngine", () => {
       expect(slow.log.errors[0]).toMatch(/Timed out after 1s/);
       const after = await fast.computeMesh(src("cube(2);"));
       expect(after.ok).toBe(true);
+      // validate asks for at most 30 s, but never more than the engine's own timeout.
+      const slowCheck = await fast.validate(src("function f(n, a = 0) = n == 0 ? a : f(n - 1, a + 1); echo(f(1e9)); cube(1);"));
+      expect(slowCheck.ok).toBe(false);
+      expect(slowCheck.log.errors[0]).toMatch(/Timed out after 1s/);
     } finally {
       await fast.dispose();
     }

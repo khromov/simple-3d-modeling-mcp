@@ -37,6 +37,7 @@ export interface RunJob {
   args?: string[];
   /** Additional files written next to the main file (used for the 2D preview). */
   extraFiles?: { name: string; data: Uint8Array }[];
+  /** A shorter timeout for this job; the engine's own timeout is always the upper bound. */
   timeoutMs?: number;
 }
 

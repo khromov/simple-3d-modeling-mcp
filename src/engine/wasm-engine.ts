@@ -190,7 +190,7 @@ export class WasmEngine extends BaseEngine {
     for (const extra of job.extraFiles ?? []) files.push({ path: posix.join(workDir, extra.name), data: extra.data });
 
     const args = [mainPath, ...(job.args ?? []), ...paramArgs(job.params), "-o", outputPath];
-    const timeoutMs = job.timeoutMs ?? this.timeoutMs;
+    const timeoutMs = Math.min(job.timeoutMs ?? Infinity, this.timeoutMs);
 
     let reply: WorkerReply;
     try {
