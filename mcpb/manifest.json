@@ -4,7 +4,7 @@
   "display_name": "Sketchpad 3D",
   "version": "1.0.0",
   "description": "Create, preview and export 3D models through conversation. Zero setup — OpenSCAD runs bundled via WebAssembly, with BOSL2 and fonts included.",
-  "long_description": "Write OpenSCAD models with your AI assistant and see them instantly: inline previews with dimensions, labelled multi-view grids, turntable animations and a live 3D viewer in your browser. Export STL, 3MF (with colours), OBJ, SVG or DXF straight to a folder of your choice. Uses an installed OpenSCAD automatically when it has the fast Manifold backend.",
+  "long_description": "Write OpenSCAD models with your AI assistant and see them instantly: inline previews with dimensions, labelled multi-view grids, turntable animations and a live 3D viewer in your browser. Export STL, 3MF (with colours), OBJ, SVG or DXF straight to a folder of your choice.",
   "author": {
     "name": "mazzanfar",
     "url": "https://github.com/mazzanfar"
@@ -35,8 +35,7 @@
       ],
       "env": {
         "OPENSCAD_OUTPUT_DIR": "${user_config.output_dir}",
-        "OPENSCAD_AUTO_OPEN_VIEWER": "${user_config.auto_open_viewer}",
-        "OPENSCAD_PATH": "${user_config.openscad_path}"
+        "OPENSCAD_AUTO_OPEN_VIEWER": "${user_config.auto_open_viewer}"
       }
     }
   },
@@ -53,12 +52,6 @@
       "description": "Open the interactive browser viewer on the first render.",
       "required": false,
       "default": true
-    },
-    "openscad_path": {
-      "type": "file",
-      "title": "OpenSCAD executable (optional)",
-      "description": "Use a specific installed OpenSCAD instead of the bundled engine. Leave empty for automatic selection.",
-      "required": false
     }
   },
   "tools": [
@@ -92,7 +85,7 @@
     },
     {
       "name": "list_libraries",
-      "description": "List bundled and installed OpenSCAD libraries"
+      "description": "List bundled OpenSCAD libraries"
     },
     {
       "name": "get_version",

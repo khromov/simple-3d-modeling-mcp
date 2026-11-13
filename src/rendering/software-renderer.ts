@@ -1,6 +1,6 @@
 /**
- * Software mesh renderer used for previews when OpenSCAD itself cannot render
- * PNGs (the WASM build has no OpenGL).
+ * Software mesh renderer that draws every preview image from the model's mesh
+ * (the WebAssembly OpenSCAD build has no OpenGL).
  *
  * - OpenSCAD camera conventions (presets, gimbal and vector cameras)
  * - automatic framing, perspective or orthographic projection
@@ -64,6 +64,8 @@ export interface RenderedImage {
 
 const RAD = Math.PI / 180;
 const CREASE_COS = Math.cos(35 * RAD);
+/** Planes closer than this to parallel with the view ray (|cos| of the angle) are skipped by the step test. */
+const GRAZING_COS = 0.05;
 const L1 = norm3(-0.4, 0.55, 0.75);
 const L2 = norm3(0.55, -0.35, 0.45);
 const HALF = norm3(L1[0], L1[1], L1[2] + 1);
@@ -285,7 +287,32 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     const lin = (i: number) => (ortho ? -zbuf[i] : 1 / zbuf[i]);
     const depthTol = sceneR * 0.04;
     const planeTol = sceneR * 0.002;
-    const check = (i: number, j: number) => {
+    // Depth (along the view axis) where the ray through supersampled pixel
+    // (px, py) meets face t's plane; NaN when the plane nearly contains the ray.
+    const planeDepth = (t: number, px: number, py: number): number => {
+      const qx = ((2 * (px + 0.5)) / W - 1 - post.ox) / post.sx;
+      const qy = (1 - (2 * (py + 0.5)) / H - post.oy) / post.sy;
+      if (ortho) {
+        if (Math.abs(fnz[t]) < GRAZING_COS) return NaN;
+        const x = (qx * aspect) / orthoK + cx, y = qy / orthoK + cy;
+        return (fnx[t] * x + fny[t] * y - fd[t]) / fnz[t];
+      }
+      const dx = (qx * aspect) / fovScale, dy = qy / fovScale;
+      const den = fnx[t] * dx + fny[t] * dy - fnz[t];
+      if (Math.abs(den) < GRAZING_COS * Math.hypot(dx, dy, 1)) return NaN;
+      return fd[t] / den;
+    };
+    // A step between faces f and g that the coarse depth test misses: their
+    // planes don't cross between the two pixel centres, and stay further apart
+    // than planeTol. Neighbouring faces of a curved surface always cross at
+    // their shared edge, however fine the tessellation, so they never count.
+    const step = (f: number, g: number, ax: number, ay: number, bx: number, by: number): boolean => {
+      const da = planeDepth(f, ax, ay) - planeDepth(g, ax, ay);
+      const db = planeDepth(f, bx, by) - planeDepth(g, bx, by);
+      if (!Number.isFinite(da) || !Number.isFinite(db) || Math.sign(da) !== Math.sign(db)) return false;
+      return Math.min(Math.abs(da), Math.abs(db)) > planeTol;
+    };
+    const check = (i: number, j: number, ax: number, ay: number, bx: number, by: number) => {
       const f = fid[i], g = fid[j];
       if (f === g) return;
       if (f < 0 || g < 0) {
@@ -293,11 +320,7 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
         return;
       }
       const dot = fnx[f] * fnx[g] + fny[f] * fny[g] + fnz[f] * fnz[g];
-      if (
-        dot < CREASE_COS ||
-        Math.abs(lin(i) - lin(j)) > depthTol ||
-        (dot > 0.9999 && Math.abs(fd[f] - fd[g]) > planeTol)
-      ) {
+      if (dot < CREASE_COS || Math.abs(lin(i) - lin(j)) > depthTol || step(f, g, ax, ay, bx, by)) {
         mask[i] = 1;
         mask[j] = 1;
       }
@@ -305,8 +328,8 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const i = y * W + x;
-        if (x + 1 < W) check(i, i + 1);
-        if (y + 1 < H) check(i, i + W);
+        if (x + 1 < W) check(i, i + 1, x, y, x + 1, y);
+        if (y + 1 < H) check(i, i + W, x, y, x, y + 1);
       }
     }
     for (let i = 0; i < W * H; i++) {

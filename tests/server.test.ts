@@ -108,6 +108,18 @@ describe("MCP server", () => {
     expect(textOf(empty)).toMatch(/top level object is empty[\s\S]*Hint: The model produced no geometry/);
   });
 
+  it("hints at bundled libraries when an include is missing", async () => {
+    const r = await call("render", { code: "include <MCAD/boxes.scad>\nroundedBox([10, 10, 10], 2, true);" });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/Can't find include file 'MCAD\/boxes\.scad'[\s\S]*Hint: Relative paths only resolve when rendering with `file`\. Bundled libraries: BOSL2/);
+  });
+
+  it("reports bad parameter names as input errors", async () => {
+    const r = await call("render", { code: "cube(1);", params: { "bad-name": 1 } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe('Invalid parameter name "bad-name" (must be an OpenSCAD identifier)');
+  });
+
   it("validates inputs", async () => {
     expect(textOf(await call("render", { code: "cube(1);", view: "sideways" }))).toMatch(/Invalid view/);
     expect(textOf(await call("render", {}))).toMatch(/Provide OpenSCAD source/);
@@ -126,6 +138,30 @@ describe("MCP server", () => {
   it("render_turntable returns an animated PNG", async () => {
     const r = await call("render_turntable", { code: "cube(5);", frames: 4, width: 128, height: 128 });
     expect(imageOf(r)!.includes(Buffer.from("acTL"))).toBe(true);
+  });
+
+  it("render_turntable views from below, and rejects negative elevations", async () => {
+    const small = { code: "cube(5);", frames: 4, width: 128, height: 128 };
+    expect((await call("render_turntable", { ...small, elevation: 125 })).isError).toBeFalsy();
+    expect((await call("render_turntable", { ...small, elevation: -55 })).isError).toBe(true);
+  });
+
+  it("stops a turntable that would be too large, and says how many frames fit", async () => {
+    // 1,600 blocks in scattered colours compress badly: about 200 KB per 1024 px frame.
+    const code =
+      "for (i = [0:39], j = [0:39]) color([((i * 37 + j * 11) % 17) / 16, ((i * 13 + j * 29) % 19) / 18, ((i * 7 + j * 23) % 13) / 12])" +
+      " translate([i * 1.5, j * 1.5, 0]) cube([1.2, 1.2, 1 + (i * 7 + j * 13) % 9]);";
+    const r = await call("render_turntable", { code, frames: 72, width: 1024, height: 1024 });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(
+      /^A 72-frame 1024×1024 turntable of this model would be about [\d.]+ MB, over the 2 MB limit for inline images \(stopped after \d+ frames\)\. Use \d+ frames or fewer at 1024×1024, or a smaller width\/height\.$/,
+    );
+  });
+
+  it("rejects cameras without a direction", async () => {
+    const r = await call("render", { code: "cube(1);", view: "1,1,1,1,1,1" });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/the eye and the center are the same point/);
   });
 
   it("exports to the output folder without overwriting", async () => {

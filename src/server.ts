@@ -13,7 +13,6 @@ import { McpServer, type CallToolResult } from "tmcp";
 import { JsonSchemaAdapter } from "tmcp/adapter";
 import { z } from "zod";
 import { OPENSCAD_CHEATSHEET, SERVER_INSTRUCTIONS } from "./cheatsheet.js";
-import { NativeEngine } from "./engine/native-engine.js";
 import { formatLog } from "./engine/output.js";
 import { paramAssignments } from "./engine/params.js";
 import { expandHome, prepareSource, resolveScadPath } from "./engine/source.js";
@@ -24,7 +23,8 @@ import { write3mf, writeBinaryStl, writeObj, writeOff } from "./geometry/writers
 import { ModelService, type Model } from "./model-service.js";
 import { bundledLibraries, bundledLibraryVersion, PACKAGE_NAME, PACKAGE_VERSION } from "./paths.js";
 import { parseView, resolvePreset, VIEW_HELP, VIEW_NAMES, type PresetView } from "./rendering/camera.js";
-import { renderMultiView, renderPreview, renderTurntable } from "./rendering/previews.js";
+import { renderMultiView, renderTurntable, TurntableTooLargeError } from "./rendering/previews.js";
+import { renderMeshPng } from "./rendering/software-renderer.js";
 import { ViewerServer } from "./viewer/index.js";
 
 // ---------------------------------------------------------------------------
@@ -32,8 +32,7 @@ import { ViewerServer } from "./viewer/index.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
-  /** Engine, or a promise for one (lets the server answer while native OpenSCAD is probed). */
-  engine: Engine | Promise<Engine>;
+  engine: Engine;
   /** Default folder for exports and relative save paths. */
   outputDir: string;
   /** Open the browser viewer automatically on the first render (default true). */
@@ -67,17 +66,15 @@ export function openInBrowser(url: string): void {
 // ---------------------------------------------------------------------------
 
 const MESH_FORMATS = ["stl", "3mf", "obj", "off"] as const;
-const EXPORT_FORMATS = [...MESH_FORMATS, "amf", "dxf", "svg", "csg", "pdf"] as const;
+const EXPORT_FORMATS = [...MESH_FORMATS, "dxf", "svg", "csg"] as const;
 const MIME: Record<string, string> = {
   stl: "model/stl",
   "3mf": "model/3mf",
   obj: "model/obj",
   off: "text/plain",
-  amf: "application/x-amf",
   dxf: "image/vnd.dxf",
   svg: "image/svg+xml",
   csg: "text/plain",
-  pdf: "application/pdf",
 };
 /**
  * Largest binary payload (image or embedded file) returned inline. tmcp checks
@@ -163,7 +160,7 @@ function hintsFor(log: EngineLog): string[] {
     hints.push("The model produced no geometry — e.g. difference() removed everything, every object is disabled with *, or a module is defined but never called.");
   }
   if (/parser error/i.test(all)) hints.push("Check for a missing semicolon, bracket or comma at or just before that line.");
-  if (/can't open (include|library|import)|can't open file/i.test(all)) {
+  if (/can't (open|find) (include|library|import)|can't open file/i.test(all)) {
     hints.push(`Relative paths only resolve when rendering with \`file\`. Bundled libraries: ${bundledLibraries().join(", ") || "none"} (e.g. include <BOSL2/std.scad>).`);
   }
   if (/timed out/i.test(all)) hints.push("Simplify the model or lower $fn; minkowski() and high $fn are common culprits.");
@@ -222,10 +219,9 @@ export function createServer(opts: CreateServerOptions): AppServer {
   const viewer = opts.viewer ?? new ViewerServer();
   const openUrl = opts.openUrl ?? openInBrowser;
   const autoOpen = opts.autoOpenViewer ?? true;
-  const enginePromise = Promise.resolve(opts.engine);
-  const modelsPromise = enginePromise.then((engine) => new ModelService(engine));
+  const engine = opts.engine;
+  const models = new ModelService(engine);
   let browserOpened = false;
-  let openscadPngBroken = false;
 
   /** Wraps a handler: user errors and oversized payloads become isError results instead of protocol errors. */
   const handle =
@@ -241,9 +237,8 @@ export function createServer(opts: CreateServerOptions): AppServer {
 
   async function loadModel(args: { code?: string; file?: string }, params?: Params) {
     const src = prepareSource(args);
-    const models = await modelsPromise;
     const outcome = await models.getModel(src, params);
-    return { src, outcome, engine: models.engine };
+    return { src, outcome };
   }
 
   async function publish(model: Model, src: PreparedSource, title?: string, params?: Params): Promise<string | undefined> {
@@ -291,24 +286,24 @@ export function createServer(opts: CreateServerOptions): AppServer {
         height: z.number().int().min(64).max(2048).optional().describe("Image height in pixels (default 768)"),
         params: paramsSchema,
         title: titleSchema,
-        colorscheme: z.string().optional().describe("Native OpenSCAD only: colour scheme, e.g. \"Tomorrow Night\""),
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     handle(async (args) => {
       const camera = parseView(args.view);
-      const { src, outcome, engine } = await loadModel(args, args.params);
+      const { src, outcome } = await loadModel(args, args.params);
       if (!outcome.ok) return failure("Render failed.", outcome.log);
       const { model } = outcome;
       const viewerUrl = await publish(model, src, args.title, args.params);
-      const preview = await renderPreview(
-        { engine, src, params: args.params, mesh: model.mesh, colorscheme: args.colorscheme, softwareOnly: openscadPngBroken },
-        { camera, projection: args.projection ?? "perspective", width: args.width ?? 1024, height: args.height ?? 768 },
-      );
-      if (preview.openscadFailed) openscadPngBroken = true;
+      const png = renderMeshPng(model.mesh, {
+        camera,
+        projection: args.projection ?? "perspective",
+        width: args.width ?? 1024,
+        height: args.height ?? 768,
+      });
       return {
         content: [
-          image(preview.png),
+          image(png),
           text(summary(model, outcome.cached, [viewerUrl ? `Interactive viewer: ${viewerUrl}` : ""])),
         ],
       };
@@ -336,15 +331,16 @@ export function createServer(opts: CreateServerOptions): AppServer {
     },
     handle(async (args) => {
       const views = (args.views ?? ["front", "right", "top", "perspective"]).map((v) => resolvePreset(v) as PresetView);
-      const { src, outcome, engine } = await loadModel(args, args.params);
+      const { src, outcome } = await loadModel(args, args.params);
       if (!outcome.ok) return failure("Multi-view render failed.", outcome.log);
       const { model } = outcome;
       const viewerUrl = await publish(model, src, args.title, args.params);
-      const result = await renderMultiView(
-        { engine, src, params: args.params, mesh: model.mesh, softwareOnly: openscadPngBroken },
-        { views, cellWidth: args.width ?? 512, cellHeight: args.height ?? 512, projection: args.projection ?? "auto" },
-      );
-      if (result.openscadFailed) openscadPngBroken = true;
+      const result = renderMultiView(model.mesh, {
+        views,
+        cellWidth: args.width ?? 512,
+        cellHeight: args.height ?? 512,
+        projection: args.projection ?? "auto",
+      });
       return {
         content: [
           image(result.png),
@@ -367,7 +363,12 @@ export function createServer(opts: CreateServerOptions): AppServer {
         frames: z.number().int().min(4).max(72).optional().describe("Number of frames (default 24)"),
         width: z.number().int().min(128).max(1024).optional().describe("Image width (default 512)"),
         height: z.number().int().min(128).max(1024).optional().describe("Image height (default 512)"),
-        elevation: z.number().min(-90).max(90).optional().describe("Camera tilt from the top view in degrees (default 55)"),
+        elevation: z
+          .number()
+          .min(0)
+          .max(180)
+          .optional()
+          .describe("Camera tilt from the top view in degrees: 0 looks straight down, 90 from the side, over 90 from below (default 55)"),
         params: paramsSchema,
         title: titleSchema,
       }),
@@ -378,12 +379,21 @@ export function createServer(opts: CreateServerOptions): AppServer {
       if (!outcome.ok) return failure("Turntable render failed.", outcome.log);
       const { model } = outcome;
       const viewerUrl = await publish(model, src, args.title, args.params);
-      const apng = renderTurntable(model.mesh, {
-        frames: args.frames ?? 24,
-        width: args.width ?? 512,
-        height: args.height ?? 512,
-        elevation: args.elevation ?? 55,
-      });
+      const frames = args.frames ?? 24, width = args.width ?? 512, height = args.height ?? 512;
+      let apng: Uint8Array;
+      try {
+        apng = renderTurntable(model.mesh, { frames, width, height, elevation: args.elevation ?? 55, maxBytes: MAX_INLINE_BYTES });
+      } catch (e) {
+        if (!(e instanceof TurntableTooLargeError)) throw e;
+        // Stopped as soon as it passed the limit. Suggest a frame count from the frames rendered so far,
+        // with 10% to spare: frames from other angles can be larger.
+        const fixedBytes = e.estimatedBytes - e.bytesPerFrame * frames;
+        const fit = Math.floor((0.9 * MAX_INLINE_BYTES - fixedBytes) / e.bytesPerFrame);
+        const advice = fit >= 4 ? `Use ${fit} frames or fewer at ${width}×${height}, or a smaller width/height.` : "Use a smaller width/height.";
+        throw new UserError(
+          `A ${frames}-frame ${width}×${height} turntable of this model would be about ${(e.estimatedBytes / 1024 / 1024).toFixed(1)} MB, over the ${MAX_INLINE_MB} MB limit for inline images (stopped after ${e.framesRendered} frames). ${advice}`,
+        );
+      }
       return {
         content: [image(apng), text(summary(model, outcome.cached, [viewerUrl ? `Interactive viewer: ${viewerUrl}` : ""]))],
       };
@@ -414,8 +424,6 @@ export function createServer(opts: CreateServerOptions): AppServer {
     },
     handle(async (args) => {
       const src = prepareSource(args);
-      const models = await modelsPromise;
-      const engine = models.engine;
 
       let target = args.path ? expandHome(args.path.trim()) : undefined;
       const pathExt = target ? extname(target).slice(1).toLowerCase() : "";
@@ -494,7 +502,6 @@ export function createServer(opts: CreateServerOptions): AppServer {
     },
     handle(async (args) => {
       const src = prepareSource(args);
-      const engine = await enginePromise;
       const r = await engine.validate(src, args.params);
       if (!r.ok) return failure("Validation found errors.", r.log);
       const detail = formatLog(r.log);
@@ -539,11 +546,10 @@ export function createServer(opts: CreateServerOptions): AppServer {
     {
       name: "list_libraries",
       title: "List OpenSCAD libraries",
-      description: "List the OpenSCAD libraries available to models (bundled BOSL2, plus libraries installed for native OpenSCAD).",
+      description: "List the OpenSCAD libraries available to models (bundled BOSL2).",
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     handle(async () => {
-      const engine = await enginePromise;
       const lines: string[] = [];
       const bundled = bundledLibraries();
       if (bundled.length) {
@@ -552,14 +558,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
           lines.push(`- ${lib} ${bundledLibraryVersion(lib) ?? ""} — include <${lib}/std.scad>`.replace("  ", " "));
         }
       }
-      if (engine instanceof NativeEngine) {
-        const libs = Object.entries(engine.listLibraries());
-        lines.push("", "## Installed for native OpenSCAD");
-        if (libs.length === 0) lines.push(`None found in: ${engine.libraryPaths().join(", ") || "(no library folders)"}`);
-        for (const [name, files] of libs) lines.push(`- ${name}: ${files.join(", ")}`);
-      } else {
-        lines.push("", "Other libraries need native OpenSCAD: install OpenSCAD and set OPENSCAD_PATH, or render a local .scad file with `file` and include it by relative path.");
-      }
+      lines.push("", "For other libraries, render a .scad file with `file` and include them by relative path.");
       return { content: [text(lines.join("\n"))] };
     }),
   );
@@ -570,11 +569,10 @@ export function createServer(opts: CreateServerOptions): AppServer {
     {
       name: "get_version",
       title: "Engine info",
-      description: "Show the OpenSCAD engine in use (bundled WASM or native), its version, backend, bundled libraries and server settings.",
+      description: "Show the OpenSCAD engine (bundled WASM), its version, backend, bundled libraries and server settings.",
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     handle(async () => {
-      const engine = await enginePromise;
       const info = await engine.describe();
       const rows = Object.entries({
         Server: `${PACKAGE_NAME} ${PACKAGE_VERSION}`,
@@ -642,11 +640,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
     viewer,
     async close() {
       await viewer.stop();
-      try {
-        await (await enginePromise).dispose();
-      } catch {
-        // engine failed to start; nothing to dispose
-      }
+      await engine.dispose();
     },
   };
 }

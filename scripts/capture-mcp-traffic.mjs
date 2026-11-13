@@ -44,7 +44,7 @@ const sha = (buf) => createHash("sha256").update(buf).digest("hex").slice(0, 16)
 
 function startSession(outDir) {
   const child = spawn(process.execPath, [resolve(entry)], {
-    env: { ...process.env, OPENSCAD_ENGINE: "wasm", OPENSCAD_AUTO_OPEN_VIEWER: "false", OPENSCAD_OUTPUT_DIR: outDir },
+    env: { ...process.env, OPENSCAD_AUTO_OPEN_VIEWER: "false", OPENSCAD_OUTPUT_DIR: outDir },
     stdio: ["pipe", "pipe", "pipe"],
   });
   child.stdin.on("error", () => {}); // EPIPE after a crash shows up as a missing response instead

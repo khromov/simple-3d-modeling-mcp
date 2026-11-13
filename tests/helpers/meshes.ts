@@ -23,6 +23,22 @@ export function box(min: V3, max: V3, color?: [number, number, number]): Mesh {
   return { positions, indices, colors };
 }
 
+/** Closed cylinder on z = 0 around the Z axis, with `segments` side facets sharing their vertices. */
+export function cylinder(r: number, h: number, segments: number): Mesh {
+  const positions: number[] = [0, 0, 0, 0, 0, h];
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    positions.push(r * Math.cos(a), r * Math.sin(a), 0, r * Math.cos(a), r * Math.sin(a), h);
+  }
+  const indices: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const b0 = 2 + i * 2, t0 = b0 + 1;
+    const b1 = 2 + ((i + 1) % segments) * 2, t1 = b1 + 1;
+    indices.push(0, b1, b0, 1, t0, t1, b0, b1, t1, b0, t1, t0);
+  }
+  return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) };
+}
+
 export function merge(...meshes: Mesh[]): Mesh {
   const positions: number[] = [];
   const indices: number[] = [];

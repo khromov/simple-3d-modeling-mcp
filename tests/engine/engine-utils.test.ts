@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { UserError } from "../../src/errors.js";
 import { formatLog, parseLog, rewritePaths } from "../../src/engine/output.js";
 import { paramArgs, stableParams } from "../../src/engine/params.js";
 import { collectDependencies, prepareSource, resolveScadPath } from "../../src/engine/source.js";
@@ -30,6 +31,25 @@ describe("parseLog", () => {
     ]);
   });
 
+  it("keeps echoed strings that span several lines together", () => {
+    const log = parseLog([
+      'ECHO: "first',
+      "",
+      '  second", 5',
+      'ECHO: "say \\"hi',
+      'there\\""',
+      "WARNING: after the echo",
+    ]);
+    expect(log.echo).toEqual(['"first\n\n  second", 5', '"say \\"hi\nthere\\""']);
+    expect(log.warnings).toEqual(["WARNING: after the echo"]);
+  });
+
+  it("never lets an unclosed echo string swallow the next log entry", () => {
+    const log = parseLog(['ECHO: "unterminated', "ERROR: Assertion failed in file input.scad, line 3", "ECHO: 2"]);
+    expect(log.echo).toEqual(['"unterminated', "2"]);
+    expect(log.errors).toEqual(["ERROR: Assertion failed in file input.scad, line 3"]);
+  });
+
   it("treats parser errors and the 2D/3D mismatch as errors", () => {
     const log = parseLog(["ERROR: Parser error: syntax error in file x.scad, line 1", "Current top level object is not a 3D object."]);
     expect(log.errors).toHaveLength(2);
@@ -55,6 +75,9 @@ describe("paramArgs", () => {
   it("rejects names that are not identifiers and non-finite numbers", () => {
     expect(() => paramArgs({ "x=1;cube(9)": 1 })).toThrow(/Invalid parameter name/);
     expect(() => paramArgs({ x: Infinity })).toThrow(/finite/);
+    // Bad params are the caller's mistake: the tools show UserError messages as-is.
+    expect(() => paramArgs({ "bad-name": 1 })).toThrow(UserError);
+    expect(() => paramArgs({ x: NaN })).toThrow(UserError);
     expect(paramArgs({ $fn: 64 })).toEqual(["-D", "$fn=64"]);
   });
 

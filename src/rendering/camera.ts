@@ -70,8 +70,12 @@ export function parseView(view?: string): CameraSpec {
     case 3:
       return { kind: "fit", rot: [nums[0], nums[1], nums[2]] };
     case 6:
+      if (Math.hypot(nums[3] - nums[0], nums[4] - nums[1], nums[5] - nums[2]) < 1e-9) {
+        throw new UserError(`Invalid view "${view}": the eye and the center are the same point, so the camera has no direction.`);
+      }
       return { kind: "vector", eye: [nums[0], nums[1], nums[2]], center: [nums[3], nums[4], nums[5]] };
     case 7:
+      if (nums[6] <= 0) throw new UserError(`Invalid view "${view}": the distance (the last number) must be positive.`);
       return { kind: "gimbal", translate: [nums[0], nums[1], nums[2]], rot: [nums[3], nums[4], nums[5]], distance: nums[6] };
     default:
       throw new UserError(`Invalid view "${view}" (${nums.length} numbers). Use ${VIEW_HELP}.`);

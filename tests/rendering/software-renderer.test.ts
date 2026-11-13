@@ -8,11 +8,45 @@ import { parseView } from "../../src/rendering/camera.js";
 import { decodePng } from "../../src/rendering/png.js";
 import { renderMesh, renderMeshPng, THEME } from "../../src/rendering/software-renderer.js";
 import { bboxOf, centroid, isBlueish, isRedish } from "../helpers/image.js";
-import { box, lShape } from "../helpers/meshes.js";
+import type { Mesh } from "../../src/geometry/mesh.js";
+import type { RenderOptions } from "../../src/rendering/software-renderer.js";
+import { box, cylinder, lShape, merge } from "../helpers/meshes.js";
 
 const SIZE = { width: 200, height: 200 };
 const notBackground = (r: number, g: number, b: number) =>
   Math.abs(r - THEME.background[0]) + Math.abs(g - THEME.background[1]) + Math.abs(b - THEME.background[2]) > 30;
+
+/** Model pixels that outlines darken: the same render with and without edges, compared. */
+function outlined(mesh: Mesh, opts: RenderOptions): { pixels: number; fraction: number } {
+  const lines = renderMesh(mesh, { ...opts, axes: false });
+  const plain = renderMesh(mesh, { ...opts, axes: false, edges: false });
+  let model = 0, pixels = 0;
+  for (let i = 0; i < plain.rgba.length; i += 4) {
+    if (!notBackground(plain.rgba[i], plain.rgba[i + 1], plain.rgba[i + 2])) continue;
+    model++;
+    if (lines.rgba[i] < plain.rgba[i] * 0.8) pixels++;
+  }
+  return { pixels, fraction: pixels / model };
+}
+
+describe("software renderer outlines", () => {
+  it("does not outline the facets of a finely tessellated curve", () => {
+    // 0.6° between neighbouring facets: they used to be marked as steps, hatching the whole side
+    // (66% of the cylinder outlined). It should show only the silhouette and rims, as a 5° cylinder does.
+    for (const view of [{ camera: parseView("iso"), projection: "perspective" as const }, { camera: parseView("front"), projection: "orthographic" as const }]) {
+      const reference = outlined(cylinder(10, 30, 72), { ...SIZE, ...view }).fraction;
+      expect(outlined(cylinder(10, 30, 600), { ...SIZE, ...view }).fraction).toBeLessThan(reference * 1.1);
+    }
+  });
+
+  it("still outlines a small step between parallel faces", () => {
+    // A 0.3 mm pad on a plate, seen from above: far below the coarse depth test, so only the step test finds it.
+    const view = { ...SIZE, camera: parseView("top"), projection: "orthographic" as const };
+    const plate = box([0, 0, 0], [40, 40, 2]);
+    const withPad = outlined(merge(plate, box([10, 10, 2], [30, 30, 2.3])), view).pixels;
+    expect(withPad - outlined(plate, view).pixels).toBeGreaterThan(200);
+  });
+});
 
 describe("software renderer orientation", () => {
   const mesh = lShape(); // red bar along X, blue 30 mm tower at +X, nub along +Y at -X

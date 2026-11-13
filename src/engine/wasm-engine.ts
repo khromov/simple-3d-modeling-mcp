@@ -149,8 +149,6 @@ export interface WasmEngineOptions {
 export class WasmEngine extends BaseEngine {
   readonly name = "wasm" as const;
   readonly capabilities: EngineCapabilities = {
-    png: false,
-    manifold: true,
     // No amf: OpenSCAD removed AMF in its 2026.09 snapshots.
     exportFormats: ["stl", "off", "obj", "dxf", "svg", "csg"],
   };
@@ -192,7 +190,8 @@ export class WasmEngine extends BaseEngine {
     for (const extra of job.extraFiles ?? []) files.push({ path: posix.join(workDir, extra.name), data: extra.data });
 
     const args = [mainPath, ...(job.args ?? []), ...paramArgs(job.params), "-o", outputPath];
-    const timeoutMs = job.timeoutMs ?? this.timeoutMs;
+    const libraries = this.libraries.filter((name) => corpus.includes(name));
+    const timeoutMs = Math.min(job.timeoutMs ?? Infinity, this.timeoutMs);
 
     let reply: WorkerReply;
     try {
@@ -201,8 +200,9 @@ export class WasmEngine extends BaseEngine {
           args,
           files,
           outputPath,
-          fonts: /text|font/i.test(corpus),
-          libraries: this.libraries.filter((name) => corpus.includes(name)),
+          // Bundled libraries call text() themselves (e.g. BOSL2's debug labels), and their sources aren't in the corpus.
+          fonts: libraries.length > 0 || /text|font/i.test(corpus),
+          libraries,
         },
         timeoutMs,
       );

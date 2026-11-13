@@ -64,6 +64,18 @@ describe("WasmEngine", () => {
     expect(computeStats(r.mesh!).size[0]).toBeGreaterThan(5);
   });
 
+  it("loads fonts when only a bundled library calls text()", async () => {
+    // BOSL2's debug_region() labels vertices with text(); the user's code never mentions text or fonts.
+    const r = await engine.computeMesh(src("include <BOSL2/std.scad>\ndebug_region([square(10)]);"));
+    expect(r.ok).toBe(true);
+    expect(r.log.warnings.filter((w) => /Can't get font/.test(w))).toEqual([]);
+  });
+
+  it("keeps echoed strings with newlines whole", async () => {
+    const r = await engine.validate(src('echo("first\\nsecond"); cube(1);')); // OpenSCAD's \n escape
+    expect(r.log.echo).toEqual(['"first\nsecond"']);
+  });
+
   it("supports the bundled BOSL2 library", async () => {
     const r = await engine.computeMesh(src("include <BOSL2/std.scad>\ncuboid([30, 20, 10], rounding = 2, $fn = 16);"));
     expect(r.ok, r.log.errors.join("\n")).toBe(true);
@@ -124,6 +136,10 @@ describe("WasmEngine", () => {
       expect(slow.log.errors[0]).toMatch(/Timed out after 1s/);
       const after = await fast.computeMesh(src("cube(2);"));
       expect(after.ok).toBe(true);
+      // validate asks for at most 30 s, but never more than the engine's own timeout.
+      const slowCheck = await fast.validate(src("function f(n, a = 0) = n == 0 ? a : f(n - 1, a + 1); echo(f(1e9)); cube(1);"));
+      expect(slowCheck.ok).toBe(false);
+      expect(slowCheck.log.errors[0]).toMatch(/Timed out after 1s/);
     } finally {
       await fast.dispose();
     }

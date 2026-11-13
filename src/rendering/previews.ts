@@ -1,71 +1,14 @@
 /**
- * Preview images built from a model: single view, labelled multi-view grid,
- * and turntable animation. Uses OpenSCAD's own renderer when the engine has
- * one (native), otherwise the software renderer.
+ * Composite previews built from a model's mesh with the software renderer:
+ * labelled multi-view grid and turntable animation. Single views are
+ * renderMeshPng() in software-renderer.ts.
  */
 
-import type { Engine, Params, PreparedSource } from "../engine/types.js";
 import type { Mesh } from "../geometry/mesh.js";
 import { drawText } from "./bitmap-font.js";
-import {
-  defaultProjection,
-  PRESET_VIEWS,
-  turntableAngles,
-  type CameraSpec,
-  type PresetView,
-  type Projection,
-} from "./camera.js";
-import { decodePng, encodeApng, encodePng } from "./png.js";
+import { defaultProjection, PRESET_VIEWS, turntableAngles, type PresetView, type Projection } from "./camera.js";
+import { ApngWriter, encodePng } from "./png.js";
 import { meshBounds, renderMesh, THEME, type RenderedImage } from "./software-renderer.js";
-
-export interface PreviewContext {
-  engine: Engine;
-  src: PreparedSource;
-  params?: Params;
-  mesh: Mesh;
-  /** Native-only: OpenSCAD colour scheme. */
-  colorscheme?: string;
-  /** Skip OpenSCAD PNG rendering (e.g. after it failed for lack of OpenGL). */
-  softwareOnly?: boolean;
-}
-
-export interface PreviewResult {
-  png: Uint8Array;
-  renderer: "openscad" | "software";
-  /** Set when OpenSCAD's renderer was tried and failed. */
-  openscadFailed?: boolean;
-}
-
-async function renderCell(
-  ctx: PreviewContext,
-  camera: CameraSpec,
-  projection: Projection,
-  width: number,
-  height: number,
-): Promise<{ image: RenderedImage; renderer: "openscad" | "software"; openscadFailed?: boolean }> {
-  let openscadFailed = false;
-  if (!ctx.softwareOnly && ctx.engine.capabilities.png && ctx.engine.renderPng) {
-    const r = await ctx.engine.renderPng(ctx.src, { camera, projection, width, height, colorscheme: ctx.colorscheme, params: ctx.params });
-    if (r.ok && r.output) {
-      try {
-        const img = decodePng(r.output);
-        return { image: img, renderer: "openscad" };
-      } catch {
-        // fall through to software rendering
-      }
-    }
-    openscadFailed = true;
-  }
-  return { image: renderMesh(ctx.mesh, { width, height, camera, projection }), renderer: "software", openscadFailed };
-}
-
-export async function renderPreview(
-  ctx: PreviewContext,
-  opts: { camera: CameraSpec; projection: Projection; width: number; height: number },
-): Promise<PreviewResult> {
-  const cell = await renderCell(ctx, opts.camera, opts.projection, opts.width, opts.height);
-  return { png: encodePng(cell.image.rgba, cell.image.width, cell.image.height), renderer: cell.renderer, openscadFailed: cell.openscadFailed };
-}
 
 export function gridColumns(n: number): number {
   return n <= 1 ? 1 : n <= 4 ? 2 : 3;
@@ -106,25 +49,19 @@ export interface MultiViewOptions {
   projection?: Projection | "auto";
 }
 
-export async function renderMultiView(ctx: PreviewContext, opts: MultiViewOptions): Promise<PreviewResult & { layout: string }> {
-  const cells = await Promise.all(
-    opts.views.map((view) => {
-      const projection = !opts.projection || opts.projection === "auto" ? defaultProjection(view) : opts.projection;
-      return renderCell(ctx, { kind: "fit", rot: [...PRESET_VIEWS[view]] }, projection, opts.cellWidth, opts.cellHeight).then((c) => ({ ...c, view, projection }));
-    }),
-  );
+export function renderMultiView(mesh: Mesh, opts: MultiViewOptions): { png: Uint8Array; layout: string } {
+  const cells = opts.views.map((view) => {
+    const projection = !opts.projection || opts.projection === "auto" ? defaultProjection(view) : opts.projection;
+    const image = renderMesh(mesh, { width: opts.cellWidth, height: opts.cellHeight, camera: { kind: "fit", rot: [...PRESET_VIEWS[view]] }, projection });
+    return { image, view, projection };
+  });
   const labels = cells.map((c) => `${c.view}${c.projection === "orthographic" ? " (ortho)" : ""}`);
   const png = composeGrid(cells.map((c) => c.image), labels, opts.cellWidth, opts.cellHeight);
   const cols = gridColumns(cells.length);
   const layout = cells
     .map((c, i) => `${["row", Math.floor(i / cols) + 1, "col", (i % cols) + 1].join(" ")}: ${labels[i]}`)
     .join("; ");
-  return {
-    png,
-    renderer: cells.every((c) => c.renderer === "openscad") ? "openscad" : "software",
-    openscadFailed: cells.some((c) => c.openscadFailed),
-    layout,
-  };
+  return { png, layout };
 }
 
 export interface TurntableOptions {
@@ -134,13 +71,37 @@ export interface TurntableOptions {
   elevation?: number;
   /** Duration of one revolution in ms (default 2400). */
   durationMs?: number;
+  /** Stop with a TurntableTooLargeError as soon as the file grows past this many bytes. */
+  maxBytes?: number;
+}
+
+/** The turntable outgrew `maxBytes`; rendering stopped there. */
+export class TurntableTooLargeError extends Error {
+  constructor(
+    /** Frames rendered before stopping. */
+    readonly framesRendered: number,
+    /** Average size of those frames, in bytes. */
+    readonly bytesPerFrame: number,
+    /** Size of the whole file, estimated from that average. */
+    readonly estimatedBytes: number,
+  ) {
+    super(`The turntable would be about ${estimatedBytes} bytes.`);
+    this.name = "TurntableTooLargeError";
+  }
 }
 
 /** Turntable APNG rendered from the mesh (constant framing across frames). */
 export function renderTurntable(mesh: Mesh, opts: TurntableOptions): Uint8Array {
   const { center, radius } = meshBounds(mesh);
-  const frames = turntableAngles(opts.frames, opts.elevation ?? 55).map(
-    (rot) => renderMesh(mesh, { width: opts.width, height: opts.height, camera: { kind: "fit", rot }, sphere: { center, radius }, margin: 0.92 }).rgba,
-  );
-  return encodeApng(frames, opts.width, opts.height, (opts.durationMs ?? 2400) / opts.frames);
+  const writer = new ApngWriter(opts.width, opts.height, opts.frames, (opts.durationMs ?? 2400) / opts.frames);
+  const start = writer.size;
+  for (const rot of turntableAngles(opts.frames, opts.elevation ?? 55)) {
+    const frame = renderMesh(mesh, { width: opts.width, height: opts.height, camera: { kind: "fit", rot }, sphere: { center, radius }, margin: 0.92 });
+    writer.addFrame(frame.rgba);
+    if (opts.maxBytes !== undefined && writer.size > opts.maxBytes) {
+      const perFrame = (writer.size - start) / writer.frames;
+      throw new TurntableTooLargeError(writer.frames, Math.round(perFrame), Math.round(start + perFrame * opts.frames));
+    }
+  }
+  return writer.finish();
 }

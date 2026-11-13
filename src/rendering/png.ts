@@ -86,38 +86,83 @@ export function encodePng(rgba: Uint8Array, width: number, height: number): Uint
   );
 }
 
-/** Animated PNG; frames are RGBA buffers of identical size. */
-export function encodeApng(frames: Uint8Array[], width: number, height: number, delayMs: number): Uint8Array {
-  const parts: Buffer[] = [Buffer.from(SIGNATURE), ihdr(width, height)];
-  const actl = Buffer.alloc(8);
-  actl.writeUInt32BE(frames.length, 0);
-  actl.writeUInt32BE(0, 4); // loop forever
-  parts.push(chunk("acTL", actl));
-  let seq = 0;
-  frames.forEach((frame, i) => {
+const IEND_BYTES = 12;
+
+/**
+ * Builds an animated PNG one frame at a time: each RGBA frame is compressed as
+ * it is added, so the caller never holds every frame's pixels at once.
+ */
+export class ApngWriter {
+  private readonly parts: Buffer[];
+  private bytes = 0;
+  private seq = 0;
+  private added = 0;
+
+  constructor(
+    private readonly width: number,
+    private readonly height: number,
+    private readonly frameCount: number,
+    private readonly delayMs: number,
+  ) {
+    const actl = Buffer.alloc(8);
+    actl.writeUInt32BE(frameCount, 0);
+    actl.writeUInt32BE(0, 4); // loop forever
+    this.parts = [];
+    this.push(Buffer.from(SIGNATURE), ihdr(width, height), chunk("acTL", actl));
+  }
+
+  /** Frames added so far. */
+  get frames(): number {
+    return this.added;
+  }
+
+  /** Size the file would have if it ended after the frames added so far. */
+  get size(): number {
+    return this.bytes + IEND_BYTES;
+  }
+
+  addFrame(rgba: Uint8Array): void {
+    if (this.added === this.frameCount) throw new Error(`The animation already has its ${this.frameCount} frames.`);
     const fctl = Buffer.alloc(26);
-    fctl.writeUInt32BE(seq++, 0);
-    fctl.writeUInt32BE(width, 4);
-    fctl.writeUInt32BE(height, 8);
+    fctl.writeUInt32BE(this.seq++, 0);
+    fctl.writeUInt32BE(this.width, 4);
+    fctl.writeUInt32BE(this.height, 8);
     fctl.writeUInt32BE(0, 12);
     fctl.writeUInt32BE(0, 16);
-    fctl.writeUInt16BE(Math.max(1, Math.round(delayMs)), 20);
+    fctl.writeUInt16BE(Math.max(1, Math.round(this.delayMs)), 20);
     fctl.writeUInt16BE(1000, 22);
     fctl[24] = 0; // dispose: none
     fctl[25] = 0; // blend: source
-    parts.push(chunk("fcTL", fctl));
-    const data = compress(frame, width, height);
-    if (i === 0) {
-      parts.push(chunk("IDAT", data));
+    const data = compress(rgba, this.width, this.height);
+    if (this.added === 0) {
+      this.push(chunk("fcTL", fctl), chunk("IDAT", data));
     } else {
       const fdat = Buffer.alloc(4 + data.length);
-      fdat.writeUInt32BE(seq++, 0);
+      fdat.writeUInt32BE(this.seq++, 0);
       data.copy(fdat, 4);
-      parts.push(chunk("fdAT", fdat));
+      this.push(chunk("fcTL", fctl), chunk("fdAT", fdat));
     }
-  });
-  parts.push(chunk("IEND", new Uint8Array(0)));
-  return new Uint8Array(Buffer.concat(parts));
+    this.added++;
+  }
+
+  finish(): Uint8Array {
+    if (this.added !== this.frameCount) throw new Error(`The animation has ${this.added} of its ${this.frameCount} frames.`);
+    return new Uint8Array(Buffer.concat([...this.parts, chunk("IEND", new Uint8Array(0))]));
+  }
+
+  private push(...buffers: Buffer[]): void {
+    for (const b of buffers) {
+      this.parts.push(b);
+      this.bytes += b.length;
+    }
+  }
+}
+
+/** Animated PNG; frames are RGBA buffers of identical size. */
+export function encodeApng(frames: Uint8Array[], width: number, height: number, delayMs: number): Uint8Array {
+  const writer = new ApngWriter(width, height, frames.length, delayMs);
+  for (const frame of frames) writer.addFrame(frame);
+  return writer.finish();
 }
 
 export interface DecodedImage {

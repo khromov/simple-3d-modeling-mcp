@@ -28,13 +28,38 @@ const FATAL = [
   /^Current top level object is not a (2D|3D) object\./,
 ];
 
+/** Lines that start a new log entry, and so never continue an echoed string. */
+const ENTRY_START = /^\s*(ECHO|ERROR|WARNING|TRACE|DEPRECATED):/;
+
+/** True when `text` ends inside a string literal (unescaped quotes are unbalanced). */
+function endsInString(text: string): boolean {
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    if (inString && text[i] === "\\") i++;
+    else if (text[i] === '"') inString = !inString;
+  }
+  return inString;
+}
+
 export function parseLog(lines: string[]): EngineLog {
   const log: EngineLog = { errors: [], warnings: [], echo: [] };
+  // OpenSCAD prints a newline inside an echoed string as a real line break, so
+  // the rest of the string arrives as the following lines.
+  let echoOpen = false;
   for (const raw of lines) {
+    if (echoOpen && !ENTRY_START.test(raw)) {
+      const last = log.echo.length - 1;
+      log.echo[last] += "\n" + raw.replace(/\r$/, "");
+      echoOpen = endsInString(log.echo[last]);
+      continue;
+    }
+    echoOpen = false;
     const line = raw.trim();
     if (!line) continue;
     if (line.startsWith("ECHO:")) {
-      log.echo.push(line.slice(5).trim());
+      const text = line.slice(5).trim();
+      log.echo.push(text);
+      echoOpen = endsInString(text);
     } else if (/^(ERROR|TRACE):/.test(line) || /parser error/i.test(line)) {
       log.errors.push(line);
     } else if (/^(WARNING|DEPRECATED):/.test(line)) {
