@@ -64,6 +64,11 @@ describe("WasmEngine", () => {
     expect(computeStats(r.mesh!).size[0]).toBeGreaterThan(5);
   });
 
+  it("keeps echoed strings with newlines whole", async () => {
+    const r = await engine.validate(src('echo("first\\nsecond"); cube(1);')); // OpenSCAD's \n escape
+    expect(r.log.echo).toEqual(['"first\nsecond"']);
+  });
+
   it("supports the bundled BOSL2 library", async () => {
     const r = await engine.computeMesh(src("include <BOSL2/std.scad>\ncuboid([30, 20, 10], rounding = 2, $fn = 16);"));
     expect(r.ok, r.log.errors.join("\n")).toBe(true);
