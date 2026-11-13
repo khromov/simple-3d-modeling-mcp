@@ -9,7 +9,7 @@
  */
 
 import { isDefaultColor, type Mesh } from "../geometry/mesh.js";
-import { drawText } from "./bitmap-font.js";
+import { drawText, GLYPH_H, GLYPH_W } from "./bitmap-font.js";
 import {
   applyMat,
   cameraRotation,
@@ -54,6 +54,19 @@ export interface RenderOptions {
   sphere?: { center: Vec3; radius: number };
   /** Fraction of the frame the model may fill (default 0.88). */
   margin?: number;
+  /**
+   * Areas (in output pixels) the model is kept out of, such as a caption drawn
+   * over the image afterwards. Only auto-framed views without `sphere` are
+   * re-framed, and only when the model would overlap one.
+   */
+  keepClear?: ClearRect[];
+}
+
+export interface ClearRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface RenderedImage {
@@ -63,6 +76,8 @@ export interface RenderedImage {
 }
 
 const RAD = Math.PI / 180;
+/** Smaller images (either side, in pixels) get no axis gizmo: it would cover the model and be too small to read. */
+export const GIZMO_MIN_SIZE = 96;
 const CREASE_COS = Math.cos(35 * RAD);
 /** Planes closer than this to parallel with the view ray (|cos| of the angle) are skipped by the step test. */
 const GRAZING_COS = 0.05;
@@ -114,6 +129,7 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
   const baseColor = opts.modelColor ?? THEME.model;
   const bounds = meshBounds(mesh);
   const sceneR = opts.sphere?.radius ?? bounds.radius;
+  const gizmo = opts.axes !== false ? layoutGizmo(w, h, S, cameraRotation(camera)) : null;
 
   const P = mesh.positions;
   const nv = P.length / 3;
@@ -209,6 +225,22 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     ny = ny * post.sy + post.oy;
     sx[v] = (nx + 1) * 0.5 * W;
     sy[v] = (1 - ny) * 0.5 * H;
+  }
+
+  // --- Keep the model clear of the gizmo and reserved areas -------------------
+  if (camera.kind === "fit" && !opts.sphere) {
+    const rects: Rect[] = gizmo ? [gizmo.box] : [];
+    for (const r of opts.keepClear ?? []) rects.push({ x0: r.x * S, y0: r.y * S, x1: (r.x + r.width) * S, y1: (r.y + r.height) * S });
+    const move = placeClear(sx, sy, valid, mesh.indices, W, H, rects, Math.round(Math.min(W, H) * 0.03));
+    if (move) {
+      // Screen x' = a·x + b, y' = a·y + c, folded into `post` as well so the outline test's inverse stays right.
+      const { a, b, c } = move;
+      for (let v = 0; v < nv; v++) {
+        sx[v] = a * sx[v] + b;
+        sy[v] = a * sy[v] + c;
+      }
+      post = { sx: a * post.sx, ox: a * post.ox + a - 1 + (2 * b) / W, sy: a * post.sy, oy: a * post.oy + 1 - a - (2 * c) / H };
+    }
   }
 
   // --- Per-face normals and shading -----------------------------------------
@@ -355,7 +387,7 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
   }
 
   // --- Overlays (drawn supersampled, so they get anti-aliased too) ----------
-  if (opts.axes !== false) drawAxes(rgb, W, H, S, cameraRotation(camera));
+  if (gizmo) drawAxes(rgb, W, H, gizmo);
   if (opts.label) drawText(rgb, W, H, 3, 8 * S, 8 * S, opts.label, 2 * S, THEME.label);
 
   // --- Downsample -------------------------------------------------------------
@@ -384,21 +416,137 @@ function sub(a: Vec3, b: Vec3): Vec3 {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
 
-function drawAxes(rgb: Uint8Array, W: number, H: number, S: number, R: Mat3): void {
-  const len = Math.max(10 * S, Math.round(Math.min(W, H) * 0.07));
-  const pad = 10 * S;
-  const ox = pad + len, oy = H - pad - len;
+/** A rectangle in supersampled pixels. */
+interface Rect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+interface GizmoLayout {
+  ox: number;
+  oy: number;
+  len: number;
+  thick: number;
+  S: number;
+  /** Axis letters, only where they are big enough to read. */
+  letters: boolean;
+  axes: { k: number; v: Vec3 }[];
+  /** Everything the gizmo draws, for keeping the model clear of it. */
+  box: Rect;
+}
+
+/**
+ * The axis gizmo in the bottom-left corner, sized to the image (none below
+ * GIZMO_MIN_SIZE) and moved in just enough that no arm or letter is cut off.
+ */
+function layoutGizmo(w: number, h: number, S: number, R: Mat3): GizmoLayout | null {
+  const size = Math.min(w, h);
+  if (size < GIZMO_MIN_SIZE) return null;
+  const len = Math.max(6 * S, Math.round(size * S * 0.07));
+  const pad = Math.min(10, Math.max(4, Math.round(size * 0.04))) * S;
   const thick = Math.max(1, Math.round(1.3 * S));
+  const letters = len >= 12 * S;
   const axes = [0, 1, 2]
     .map((k) => ({ k, v: applyMat(R, k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0) }))
     .sort((a, b) => a.v[2] - b.v[2]); // far axes first
-  for (const { k, v } of axes) {
-    const tx = ox + v[0] * len, ty = oy - v[1] * len;
-    drawLine(rgb, W, H, ox, oy, tx, ty, thick, THEME.axes[k]);
+  // Extent around the origin: arm tips, and letter boxes beyond them.
+  let minX = -thick, maxX = thick, minY = -thick, maxY = thick;
+  for (const { v } of axes) {
+    minX = Math.min(minX, v[0] * len - thick); maxX = Math.max(maxX, v[0] * len + thick);
+    minY = Math.min(minY, -v[1] * len - thick); maxY = Math.max(maxY, -v[1] * len + thick);
+    if (letters) {
+      const lx = v[0] * (len + 7 * S) - 2.5 * S, ly = -v[1] * (len + 7 * S) - 3.5 * S;
+      minX = Math.min(minX, lx); maxX = Math.max(maxX, lx + GLYPH_W * S);
+      minY = Math.min(minY, ly); maxY = Math.max(maxY, ly + GLYPH_H * S);
+    }
+  }
+  let ox = pad + len, oy = h * S - pad - len;
+  ox += Math.max(0, pad - (ox + minX));
+  oy -= Math.max(0, oy + maxY - (h * S - pad));
+  return { ox, oy, len, thick, S, letters, axes, box: { x0: ox + minX, y0: oy + minY, x1: ox + maxX, y1: oy + maxY } };
+}
+
+function drawAxes(rgb: Uint8Array, W: number, H: number, g: GizmoLayout): void {
+  const { ox, oy, len, thick, S } = g;
+  for (const { k, v } of g.axes) {
+    drawLine(rgb, W, H, ox, oy, ox + v[0] * len, oy - v[1] * len, thick, THEME.axes[k]);
+    if (!g.letters) continue;
     const lx = ox + v[0] * (len + 7 * S) - 2.5 * S;
     const ly = oy - v[1] * (len + 7 * S) - 3.5 * S;
     drawText(rgb, W, H, 3, lx, ly, "XYZ"[k], S, THEME.axes[k]);
   }
+}
+
+/** True when the triangle overlaps the rectangle (separating-axis test). */
+function triangleHitsRect(x0: number, y0: number, x1: number, y1: number, x2: number, y2: number, r: Rect): boolean {
+  if (Math.max(x0, x1, x2) < r.x0 || Math.min(x0, x1, x2) > r.x1 || Math.max(y0, y1, y2) < r.y0 || Math.min(y0, y1, y2) > r.y1) return false;
+  const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+  if (area === 0) return false;
+  const corners = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]];
+  const tri = [[x0, y0], [x1, y1], [x2, y2]];
+  for (let e = 0; e < 3; e++) {
+    const [ax, ay] = tri[e], [bx, by] = tri[(e + 1) % 3];
+    // Every corner on the outer side of this edge: separated.
+    if (corners.every(([px, py]) => ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * area < 0)) return false;
+  }
+  return true;
+}
+
+/**
+ * If the projected model overlaps any of `rects`, the screen transform
+ * (x' = a·x + b, y' = a·y + c, a ≤ 1) that fits it, with `pad` to spare, into
+ * the largest part of the frame clear of them; otherwise null. Each rect is
+ * cleared by giving up the band on one of its sides, whichever leaves the most
+ * room.
+ */
+function placeClear(
+  sx: Float64Array, sy: Float64Array, valid: Uint8Array, idx: Uint32Array, W: number, H: number, rects: Rect[], pad: number,
+): { a: number; b: number; c: number } | null {
+  const hits = (r: Rect, a: number, b: number, c: number) => {
+    for (let t = 0; t < idx.length; t += 3) {
+      const p = idx[t], q = idx[t + 1], s = idx[t + 2];
+      if (!valid[p] || !valid[q] || !valid[s]) continue;
+      if (triangleHitsRect(a * sx[p] + b, a * sy[p] + c, a * sx[q] + b, a * sy[q] + c, a * sx[s] + b, a * sy[s] + c, r)) return true;
+    }
+    return false;
+  };
+  const avoid = rects.filter((r) => hits(r, 1, 0, 0));
+  if (avoid.length === 0) return null;
+
+  let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+  for (let v = 0; v < sx.length; v++) {
+    if (!valid[v]) continue;
+    bx0 = Math.min(bx0, sx[v]); bx1 = Math.max(bx1, sx[v]);
+    by0 = Math.min(by0, sy[v]); by1 = Math.max(by1, sy[v]);
+  }
+  const bw = Math.max(bx1 - bx0, 1e-9), bh = Math.max(by1 - by0, 1e-9);
+
+  let best: { a: number; b: number; c: number } | null = null;
+  for (let round = 0; round < rects.length; round++) {
+    best = null;
+    // Try every choice of side for every rect to avoid.
+    for (let choice = 0; choice < 4 ** avoid.length; choice++) {
+      let x0 = 0, x1 = W, y0 = 0, y1 = H;
+      for (let i = 0, rest = choice; i < avoid.length; i++, rest = Math.floor(rest / 4)) {
+        const r = avoid[i];
+        if (rest % 4 === 0) x0 = Math.max(x0, r.x1);
+        else if (rest % 4 === 1) x1 = Math.min(x1, r.x0);
+        else if (rest % 4 === 2) y0 = Math.max(y0, r.y1);
+        else y1 = Math.min(y1, r.y0);
+      }
+      const a = Math.min(1, (x1 - x0 - 2 * pad) / bw, (y1 - y0 - 2 * pad) / bh);
+      if (a <= 0 || (best && a <= best.a)) continue;
+      best = { a, b: (x0 + x1) / 2 - a * (bx0 + bx1) / 2, c: (y0 + y1) / 2 - a * (by0 + by1) / 2 };
+    }
+    if (!best) return null;
+    const found = best;
+    const more = rects.filter((r) => !avoid.includes(r) && hits(r, found.a, found.b, found.c));
+    if (more.length === 0) return best;
+    avoid.push(...more);
+  }
+  return best;
 }
 
 function drawLine(rgb: Uint8Array, W: number, H: number, x0: number, y0: number, x1: number, y1: number, thick: number, color: RGB): void {

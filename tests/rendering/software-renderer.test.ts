@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { parseView } from "../../src/rendering/camera.js";
 import { decodePng } from "../../src/rendering/png.js";
 import { renderMesh, renderMeshPng, THEME } from "../../src/rendering/software-renderer.js";
-import { bboxOf, centroid, isBlueish, isRedish } from "../helpers/image.js";
+import { bboxOf, centroid, isBlueish, isRedish, type Pred } from "../helpers/image.js";
 import type { Mesh } from "../../src/geometry/mesh.js";
 import type { RenderOptions } from "../../src/rendering/software-renderer.js";
 import { box, cylinder, lShape, merge } from "../helpers/meshes.js";
@@ -78,6 +78,63 @@ describe("software renderer dark colours", () => {
     // Its three faces used to be within 2 levels of each other.
     const navy = faces([38, 38, 77]);
     expect(navy.max - navy.min).toBeGreaterThan(10);
+  });
+});
+
+describe("software renderer overlays", () => {
+  const isAxis: Pred = (r, g, b) => THEME.axes.some(([ar, ag, ab]) => Math.abs(r - ar) + Math.abs(g - ag) + Math.abs(b - ab) < 40);
+  // The gizmo test uses a magenta cube: no axis colour, nor its blend with the background, looks like it.
+  const isMagenta: Pred = (r, g, b) => r > 60 && b > 60 && g < r / 2 && Math.abs(r - b) < 40;
+  const isOrange: Pred = (r, g, b) => r > 60 && r > g + 30 && b < 60; // shades of the default model colour
+  const front = { camera: parseView("front"), projection: "orthographic" as const };
+  /** Model pixels inside a rectangle. */
+  function modelIn(img: ReturnType<typeof renderMesh>, x0: number, y0: number, x1: number, y1: number, isModel: Pred = isOrange): number {
+    let n = 0;
+    for (let y = Math.max(0, y0); y <= Math.min(img.height - 1, y1); y++) {
+      for (let x = Math.max(0, x0); x <= Math.min(img.width - 1, x1); x++) {
+        const i = (y * img.width + x) * 4;
+        if (isModel(img.rgba[i], img.rgba[i + 1], img.rgba[i + 2])) n++;
+      }
+    }
+    return n;
+  }
+
+  it("leaves the gizmo out of images too small to read it", () => {
+    const cube = box([0, 0, 0], [10, 10, 10]);
+    const opts = { width: 64, height: 64 };
+    expect(Buffer.from(renderMesh(cube, { ...opts, axes: true }).rgba).equals(Buffer.from(renderMesh(cube, { ...opts, axes: false }).rgba))).toBe(true);
+  });
+
+  it("keeps the model clear of the gizmo", () => {
+    // Seen from the front, a cube fills the frame and used to sit under the gizmo's corner.
+    for (const size of [128, 256, 512]) {
+      const img = renderMesh(box([0, 0, 0], [10, 10, 10], [255, 0, 255]), { width: size, height: size, ...front, edges: false });
+      const gizmo = bboxOf(img, isAxis);
+      expect(gizmo.count, `${size} px`).toBeGreaterThan(0);
+      expect(modelIn(img, gizmo.minX, gizmo.minY, gizmo.maxX, gizmo.maxY, isMagenta), `${size} px`).toBe(0);
+    }
+  });
+
+  it("keeps the gizmo, letters included, inside the image", () => {
+    // In the bottom view +Y points down, so its letter is the one closest to the bottom edge.
+    const img = renderMesh(box([0, 0, 0], [10, 10, 10]), { width: 256, height: 256, camera: parseView("bottom"), projection: "orthographic" });
+    const gizmo = bboxOf(img, isAxis);
+    expect(gizmo.maxY).toBeLessThan(256 - 2);
+    expect(gizmo.minX).toBeGreaterThan(1);
+  });
+
+  it("keeps the model clear of reserved areas, such as a title", () => {
+    const tall = box([0, 0, 0], [10, 10, 40]);
+    const opts = { width: 128, height: 128, ...front, axes: false };
+    expect(modelIn(renderMesh(tall, opts), 0, 0, 79, 19)).toBeGreaterThan(0); // the tower reaches the top-left corner…
+    expect(modelIn(renderMesh(tall, { ...opts, keepClear: [{ x: 0, y: 0, width: 80, height: 20 }] }), 0, 0, 79, 19)).toBe(0); // …unless it is kept clear
+  });
+
+  it("leaves the framing alone when nothing overlaps", () => {
+    const cube = box([0, 0, 0], [10, 10, 10]);
+    const opts = { ...SIZE, ...front, axes: false };
+    const corner = { x: 196, y: 196, width: 4, height: 4 };
+    expect(Buffer.from(renderMesh(cube, { ...opts, keepClear: [corner] }).rgba).equals(Buffer.from(renderMesh(cube, opts).rgba))).toBe(true);
   });
 });
 

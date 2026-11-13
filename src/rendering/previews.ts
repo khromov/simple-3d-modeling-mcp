@@ -5,10 +5,14 @@
  */
 
 import type { Mesh } from "../geometry/mesh.js";
-import { drawText } from "./bitmap-font.js";
+import { drawText, GLYPH_H, textWidth } from "./bitmap-font.js";
 import { defaultProjection, PRESET_VIEWS, turntableAngles, type PresetView, type Projection } from "./camera.js";
 import { ApngWriter, encodePng } from "./png.js";
 import { meshBounds, renderMesh, THEME, type RenderedImage } from "./software-renderer.js";
+
+/** Scale and position of the view title drawn in each multiview cell. */
+const TITLE_X = 8, TITLE_Y = 8;
+const titleScale = (cellW: number) => (cellW >= 384 ? 2 : 1);
 
 export function gridColumns(n: number): number {
   return n <= 1 ? 1 : n <= 4 ? 2 : 3;
@@ -35,8 +39,7 @@ export function composeGrid(cells: RenderedImage[], labels: string[], cellW: num
         out[d] = cell.rgba[s]; out[d + 1] = cell.rgba[s + 1]; out[d + 2] = cell.rgba[s + 2]; out[d + 3] = 255;
       }
     }
-    const scale = cellW >= 384 ? 2 : 1;
-    drawText(out, W, H, 4, ox + 8, oy + 8, labels[i], scale, THEME.label);
+    drawText(out, W, H, 4, ox + TITLE_X, oy + TITLE_Y, labels[i], titleScale(cellW), THEME.label);
   });
   return encodePng(out, W, H);
 }
@@ -50,12 +53,22 @@ export interface MultiViewOptions {
 }
 
 export function renderMultiView(mesh: Mesh, opts: MultiViewOptions): { png: Uint8Array; layout: string } {
+  const scale = titleScale(opts.cellWidth);
   const cells = opts.views.map((view) => {
     const projection = !opts.projection || opts.projection === "auto" ? defaultProjection(view) : opts.projection;
-    const image = renderMesh(mesh, { width: opts.cellWidth, height: opts.cellHeight, camera: { kind: "fit", rot: [...PRESET_VIEWS[view]] }, projection });
-    return { image, view, projection };
+    const label = `${view}${projection === "orthographic" ? " (ortho)" : ""}`;
+    // Keep the model out from under the title composeGrid draws in the corner.
+    const title = { x: 0, y: 0, width: TITLE_X + textWidth(label, scale) + 4, height: TITLE_Y + GLYPH_H * scale + 4 };
+    const image = renderMesh(mesh, {
+      width: opts.cellWidth,
+      height: opts.cellHeight,
+      camera: { kind: "fit", rot: [...PRESET_VIEWS[view]] },
+      projection,
+      keepClear: [title],
+    });
+    return { image, label };
   });
-  const labels = cells.map((c) => `${c.view}${c.projection === "orthographic" ? " (ortho)" : ""}`);
+  const labels = cells.map((c) => c.label);
   const png = composeGrid(cells.map((c) => c.image), labels, opts.cellWidth, opts.cellHeight);
   const cols = gridColumns(cells.length);
   const layout = cells
