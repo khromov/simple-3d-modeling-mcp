@@ -330,23 +330,32 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
       if (dw2 > 0) lo = Math.max(lo, Math.ceil((eps - a2) / dw2) - 1);
       else if (dw2 < 0) hi = Math.min(hi, Math.floor((eps - a2) / dw2) + 1);
       else if (a2 < eps) continue;
-      for (let u = lo, row = py * W + minX + lo; u <= hi; u++, row++) {
-        const w0 = a0 + u * dw0, w1 = a1 + u * dw1, w2 = 1 - w0 - w1;
-        if (w0 < eps || w1 < eps || w2 < eps) continue;
-        const z = w0 * z0 + w1 * z1 + w2 * z2;
-        if (z <= zbuf[row]) continue;
-        if (opacity === 1) {
-          zbuf[row] = z;
-          fid[row] = t;
-          continue;
+      // Two copies of the pixel loop, so the opaque one (nearly every face) stays as tight as possible.
+      if (opacity === 1) {
+        for (let u = lo, row = py * W + minX + lo; u <= hi; u++, row++) {
+          const w0 = a0 + u * dw0, w1 = a1 + u * dw1, w2 = 1 - w0 - w1;
+          if (w0 < eps || w1 < eps || w2 < eps) continue;
+          const z = w0 * z0 + w1 * z1 + w2 * z2;
+          if (z > zbuf[row]) {
+            zbuf[row] = z;
+            fid[row] = t;
+          }
         }
-        const o = row * 3;
-        rgb[o] += (shade[t * 3] - rgb[o]) * opacity;
-        rgb[o + 1] += (shade[t * 3 + 1] - rgb[o + 1]) * opacity;
-        rgb[o + 2] += (shade[t * 3 + 2] - rgb[o + 2]) * opacity;
-        if (z > tzbuf[row]) {
-          tzbuf[row] = z;
-          tfid[row] = t;
+      } else {
+        const r = shade[t * 3], g = shade[t * 3 + 1], b = shade[t * 3 + 2];
+        for (let u = lo, row = py * W + minX + lo; u <= hi; u++, row++) {
+          const w0 = a0 + u * dw0, w1 = a1 + u * dw1, w2 = 1 - w0 - w1;
+          if (w0 < eps || w1 < eps || w2 < eps) continue;
+          const z = w0 * z0 + w1 * z1 + w2 * z2;
+          if (z <= zbuf[row]) continue; // behind the opaque surface
+          const o = row * 3;
+          rgb[o] += (r - rgb[o]) * opacity;
+          rgb[o + 1] += (g - rgb[o + 1]) * opacity;
+          rgb[o + 2] += (b - rgb[o + 2]) * opacity;
+          if (z > tzbuf[row]) {
+            tzbuf[row] = z;
+            tfid[row] = t;
+          }
         }
       }
     }
@@ -397,54 +406,76 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     }
   }
 
-  /**
-   * Outlines the faces in `ids` (nearest face per pixel, with its depth key in
-   * `depth`): silhouettes, creases and steps. Outline pixels are darkened to
-   * `keep` of their colour, or lightened on dark faces.
-   */
-  const outline = (ids: Int32Array, depth: Float32Array, keep: number) => {
-    const mask = new Uint8Array(W * H);
-    const lin = (i: number) => (ortho ? -depth[i] : 1 / depth[i]);
-    const depthTol = sceneR * 0.04;
-    const planeTol = sceneR * 0.002;
-    // Depth (along the view axis) where the ray through supersampled pixel
-    // (px, py) meets face t's plane; NaN when the plane nearly contains the ray.
-    const planeDepth = (t: number, px: number, py: number): number => {
-      const qx = ((2 * (px + 0.5)) / W - 1 - post.ox) / post.sx;
-      const qy = (1 - (2 * (py + 0.5)) / H - post.oy) / post.sy;
-      if (ortho) {
-        if (Math.abs(fnz[t]) < GRAZING_COS) return NaN;
-        const x = (qx * aspect) / orthoK + cx, y = qy / orthoK + cy;
-        return (fnx[t] * x + fny[t] * y - fd[t]) / fnz[t];
-      }
-      const dx = (qx * aspect) / fovScale, dy = qy / fovScale;
-      const den = fnx[t] * dx + fny[t] * dy - fnz[t];
-      if (Math.abs(den) < GRAZING_COS * Math.hypot(dx, dy, 1)) return NaN;
-      return fd[t] / den;
-    };
-    // A step between faces f and g that the coarse depth test misses: their
-    // planes don't cross between the two pixel centres, and stay further apart
-    // than planeTol. Neighbouring faces of a curved surface always cross at
-    // their shared edge, however fine the tessellation, so they never count.
-    const step = (f: number, g: number, ax: number, ay: number, bx: number, by: number): boolean => {
-      const da = planeDepth(f, ax, ay) - planeDepth(g, ax, ay);
-      const db = planeDepth(f, bx, by) - planeDepth(g, bx, by);
-      if (!Number.isFinite(da) || !Number.isFinite(db) || Math.sign(da) !== Math.sign(db)) return false;
-      return Math.min(Math.abs(da), Math.abs(db)) > planeTol;
-    };
-    const check = (i: number, j: number, ax: number, ay: number, bx: number, by: number) => {
-      const f = ids[i], g = ids[j];
-      if (f === g) return;
-      if (f < 0 || g < 0) {
-        mask[f < 0 ? j : i] = 1; // silhouette: darken the model side
-        return;
-      }
-      const dot = fnx[f] * fnx[g] + fny[f] * fny[g] + fnz[f] * fnz[g];
-      if (dot < CREASE_COS || Math.abs(lin(i) - lin(j)) > depthTol || step(f, g, ax, ay, bx, by)) {
-        mask[i] = 1;
-        mask[j] = 1;
-      }
-    };
+  // --- Outline test ------------------------------------------------------------
+  // The layer being outlined: the opaque faces, or later the transparent ones
+  // (nearest face per pixel, and its depth key). The tests below are defined
+  // once and read the layer from here, which keeps them as fast as when they
+  // only served the opaque faces.
+  let layerIds = fid, layerDepth = zbuf, mask = new Uint8Array(0);
+  const lin = (i: number) => (ortho ? -layerDepth[i] : 1 / layerDepth[i]);
+  const depthTol = sceneR * 0.04;
+  const planeTol = sceneR * 0.002;
+  // Depth (along the view axis) where the ray through supersampled pixel
+  // (px, py) meets face t's plane; NaN when the plane nearly contains the ray.
+  const planeDepth = (t: number, px: number, py: number): number => {
+    const qx = ((2 * (px + 0.5)) / W - 1 - post.ox) / post.sx;
+    const qy = (1 - (2 * (py + 0.5)) / H - post.oy) / post.sy;
+    if (ortho) {
+      if (Math.abs(fnz[t]) < GRAZING_COS) return NaN;
+      const x = (qx * aspect) / orthoK + cx, y = qy / orthoK + cy;
+      return (fnx[t] * x + fny[t] * y - fd[t]) / fnz[t];
+    }
+    const dx = (qx * aspect) / fovScale, dy = qy / fovScale;
+    const den = fnx[t] * dx + fny[t] * dy - fnz[t];
+    if (Math.abs(den) < GRAZING_COS * Math.hypot(dx, dy, 1)) return NaN;
+    return fd[t] / den;
+  };
+  // A step between faces f and g that the coarse depth test misses: their
+  // planes don't cross between the two pixel centres, and stay further apart
+  // than planeTol. Neighbouring faces of a curved surface always cross at
+  // their shared edge, however fine the tessellation, so they never count.
+  const step = (f: number, g: number, ax: number, ay: number, bx: number, by: number): boolean => {
+    const da = planeDepth(f, ax, ay) - planeDepth(g, ax, ay);
+    const db = planeDepth(f, bx, by) - planeDepth(g, bx, by);
+    if (!Number.isFinite(da) || !Number.isFinite(db) || Math.sign(da) !== Math.sign(db)) return false;
+    return Math.min(Math.abs(da), Math.abs(db)) > planeTol;
+  };
+  const check = (i: number, j: number, ax: number, ay: number, bx: number, by: number) => {
+    const f = layerIds[i], g = layerIds[j];
+    if (f === g) return;
+    if (f < 0 || g < 0) {
+      mask[f < 0 ? j : i] = 1; // silhouette: darken the model side
+      return;
+    }
+    const dot = fnx[f] * fnx[g] + fny[f] * fny[g] + fnz[f] * fnz[g];
+    if (dot < CREASE_COS || Math.abs(lin(i) - lin(j)) > depthTol || step(f, g, ax, ay, bx, by)) {
+      mask[i] = 1;
+      mask[j] = 1;
+    }
+  };
+  // --- Passes: opaque faces, then transparent ones ---------------------------------
+  // Pass 0 outlines the opaque faces. When there are transparent faces, pass 1
+  // blends them over the image back to front (sorted by eye-space depth; +Z
+  // points at the viewer), only where they are in front of the opaque surface,
+  // and outlines them a little more lightly so their shape reads. The pixel
+  // loops stay inline here: run from a helper function, they made every
+  // opaque render about 7% slower.
+  const edges = opts.edges !== false && nt > 0;
+  const clear: number[] = [];
+  for (let t = 0; t < nt; t++) if (alpha[t] > 0 && alpha[t] < 255) clear.push(t);
+  for (let pass = 0; pass < (clear.length > 0 ? 2 : 1); pass++) {
+    if (pass === 1) {
+      tzbuf = new Float32Array(W * H).fill(-Infinity);
+      tfid = new Int32Array(W * H).fill(-1);
+      const depthOf = (t: number) => ez[idx[t * 3]] + ez[idx[t * 3 + 1]] + ez[idx[t * 3 + 2]];
+      clear.sort((p, q) => depthOf(p) - depthOf(q));
+      for (const t of clear) draw(t, alpha[t] / 255);
+      layerIds = tfid;
+      layerDepth = tzbuf;
+    }
+    if (!edges) continue;
+    const keep = pass === 0 ? 0.4 : 0.6; // outline pixels keep this much of their colour
+    mask = new Uint8Array(W * H);
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const i = y * W + x;
@@ -461,22 +492,6 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
         rgb[o] = rgb[o] * keep; rgb[o + 1] = rgb[o + 1] * keep; rgb[o + 2] = rgb[o + 2] * keep;
       }
     }
-  };
-  const edges = opts.edges !== false && nt > 0;
-  if (edges) outline(fid, zbuf, 0.4);
-
-  // --- Transparent faces --------------------------------------------------------
-  // Blended back to front (sorted by eye-space depth; +Z points at the viewer),
-  // then outlined a little more lightly so a transparent part's shape reads.
-  const clear: number[] = [];
-  for (let t = 0; t < nt; t++) if (alpha[t] > 0 && alpha[t] < 255) clear.push(t);
-  if (clear.length > 0) {
-    tzbuf = new Float32Array(W * H).fill(-Infinity);
-    tfid = new Int32Array(W * H).fill(-1);
-    const depthOf = (t: number) => ez[idx[t * 3]] + ez[idx[t * 3 + 1]] + ez[idx[t * 3 + 2]];
-    clear.sort((p, q) => depthOf(p) - depthOf(q));
-    for (const t of clear) draw(t, alpha[t] / 255);
-    if (edges) outline(tfid, tzbuf, 0.6);
   }
 
   // --- Overlays (drawn supersampled, so they get anti-aliased too) ----------
