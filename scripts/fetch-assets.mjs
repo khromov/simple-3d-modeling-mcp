@@ -26,10 +26,12 @@ const MANIFEST = join(ASSETS, "manifest.json");
 // The "web" variant is an ES module factory plus a separate .wasm, run in-process
 // on a virtual filesystem. (The "node" variant is a CLI with host filesystem access.)
 // files.openscad.org keeps dated snapshots for months, not forever: bump when a pin disappears.
+// The newest day's snapshot can still be rebuilt under the same name (2026.11.12 was, late that
+// day), so pin one that is a few days old.
 const OPENSCAD = {
   version: "2026.11.12",
   url: "https://files.openscad.org/snapshots/OpenSCAD-2026.11.12-WebAssembly-web.zip",
-  sha256: "bcc2f87ee5e871aa22dedf68777dd8ef845e0353033678efaf8bda8dae7b4d80",
+  sha256: "2d9cccd2bda9593a1208a7b5b12a45be72b78eb9a4226ef8d3d3f74a139f733e",
 };
 
 const BOSL2 = {
@@ -53,7 +55,15 @@ const require = createRequire(import.meta.url);
 const fontPkgDir = dirname(require.resolve("dejavu-fonts-ttf/package.json"));
 const fontVersion = JSON.parse(readFileSync(join(fontPkgDir, "package.json"), "utf8")).version;
 
-const wanted = { openscad: OPENSCAD.version, bosl2: BOSL2.tag, fonts: fontVersion, fontFiles: FONT_FILES };
+// Checksums too: a pin can change without a new version (a rebuilt snapshot), and existing assets must follow it.
+const wanted = {
+  openscad: OPENSCAD.version,
+  openscadSha256: OPENSCAD.sha256,
+  bosl2: BOSL2.tag,
+  bosl2Sha256: BOSL2.sha256,
+  fonts: fontVersion,
+  fontFiles: FONT_FILES,
+};
 
 if (existsSync(MANIFEST)) {
   try {
