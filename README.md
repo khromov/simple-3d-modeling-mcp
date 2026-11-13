@@ -189,3 +189,7 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 ## License
 
 GPL-2.0 (required by the bundled OpenSCAD). Bundled third-party assets keep their own licenses, included alongside them: OpenSCAD's WebAssembly build (GPL, see [openscad/openscad](https://github.com/openscad/openscad)), BOSL2 (BSD-2-Clause), DejaVu fonts (Bitstream Vera / public domain). The viewer page bundles three.js and Svelte (MIT), Lucide icons (ISC) and the Jost and IBM Plex Mono fonts (OFL-1.1); their license texts ship in `dist/viewer-ui/THIRD-PARTY-LICENSES.md`.
+
+## Credits
+
+This project is based on [mazzanfar/simple-3d-modeling-mcp](https://github.com/mazzanfar/simple-3d-modeling-mcp).
