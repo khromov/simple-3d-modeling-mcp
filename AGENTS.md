@@ -58,6 +58,7 @@ scripts/fetch-assets.mjs  builds assets/ (OpenSCAD WASM, fonts, BOSL2; git-ignor
 scripts/build-mcpb.sh   bundle layout: server/{dist,assets,node_modules,package.json}
 scripts/capture-mcp-traffic.mjs  raw JSON-RPC capture of dist/ over stdio, volatile values masked; fails on unexpected outcomes (CI smoke test)
 mcpb/manifest.json      Claude Desktop extension manifest (tools list, user_config → env)
+.devcontainer/devcontainer.json  dev container (Node 22 + Bun); .github/workflows/devcontainer.yml builds and tests inside it
 ```
 
 Request flow: a tool handler calls `prepareSource({ code | file })`, then `ModelService.getModel()`. On a cache miss that runs `engine.computeMesh()`, which uses OpenSCAD with `--backend=manifold` writing coloured OFF, then `parseOff()`. The resulting `Mesh` feeds stats, previews, the viewer and the mesh-based exporters, so one evaluation serves render, multiview, turntable, viewer and export.

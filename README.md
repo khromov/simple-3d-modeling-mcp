@@ -182,6 +182,17 @@ npm run build:mcpb   # Claude Desktop extension bundle
 
 The browser viewer is a Vite + Svelte 5 app in `viewer/` (an npm workspace). `npm run build` bundles it, three.js included, into `dist/viewer-ui`, which the server serves locally.
 
+### Dev container
+
+`.devcontainer/devcontainer.json` sets up Node 22 and Bun (for the `bun --bun vitest run` suite CI also runs) on Debian, with the Svelte, Vitest and OpenSCAD VS Code extensions. Open the repository in VS Code and choose **Reopen in Container**, or use the [devcontainer CLI](https://github.com/devcontainers/cli):
+
+```bash
+devcontainer up --workspace-folder .
+devcontainer exec --workspace-folder . npm test
+```
+
+Creating the container runs `npm ci && npm run build`, which needs network to download the OpenSCAD WASM build and BOSL2. After that `npm test`, `npm run typecheck`, `npm run dev:viewer` (port 5173 is forwarded) and the MCP server (`node dist/index.js`) work as-is. The live viewer opened by the server listens on a random `127.0.0.1` port that VS Code forwards when it appears; no browser opens by itself inside the container, so open the forwarded URL.
+
 ### Releasing
 
 Releases are automated with [release-please](https://github.com/googleapis/release-please). Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `feat!:` …) on `main`; release-please keeps a release PR open with the next version and changelog. Merging it tags the release, publishes to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC, with provenance — no npm token is stored), and attaches `sketchpad-3d.mcpb` to the GitHub release.
