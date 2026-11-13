@@ -280,29 +280,43 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
   // --- Rasterise --------------------------------------------------------------
   const zbuf = new Float32Array(W * H).fill(-Infinity);
   const fid = new Int32Array(W * H).fill(-1);
-  for (let t = 0; t < nt; t++) {
-    const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
-    if (!valid[a] || !valid[b] || !valid[c]) continue;
-    const x0 = sx[a], y0 = sy[a], x1 = sx[b], y1 = sy[b], x2 = sx[c], y2 = sy[c];
+  /**
+   * Fills a screen-space triangle of face t, keeping the nearest face per
+   * pixel. Each row visits only the columns between the triangle's edges, not
+   * its whole bounding box, which long thin triangles (fine cylinder caps)
+   * would make many times larger than the triangle.
+   */
+  const fill = (t: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) => {
     const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-    if (Math.abs(area) < 1e-12) continue;
+    if (Math.abs(area) < 1e-12) return;
     const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
     const maxX = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)));
     const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
     const maxY = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)));
-    if (minX > maxX || minY > maxY) continue;
+    if (minX > maxX || minY > maxY) return;
     const inv = 1 / area;
-    const z0 = dk[a], z1 = dk[b], z2 = dk[c];
-    const dw0 = (y1 - y2) * inv, dw1 = (y2 - y0) * inv;
+    const dw0 = (y1 - y2) * inv, dw1 = (y2 - y0) * inv, dw2 = -dw0 - dw1;
     const eps = -1e-7;
     for (let py = minY; py <= maxY; py++) {
       const pyc = py + 0.5;
       const pxc = minX + 0.5;
-      let w0 = ((x1 - pxc) * (y2 - pyc) - (x2 - pxc) * (y1 - pyc)) * inv;
-      let w1 = ((x2 - pxc) * (y0 - pyc) - (x0 - pxc) * (y2 - pyc)) * inv;
-      let row = py * W + minX;
-      for (let px = minX; px <= maxX; px++, row++, w0 += dw0, w1 += dw1) {
-        const w2 = 1 - w0 - w1;
+      // Barycentrics at the row's first column; each grows by dw per column.
+      const a0 = ((x1 - pxc) * (y2 - pyc) - (x2 - pxc) * (y1 - pyc)) * inv;
+      const a1 = ((x2 - pxc) * (y0 - pyc) - (x0 - pxc) * (y2 - pyc)) * inv;
+      // Columns where each is ≥ eps, widened by one for rounding; the test below still decides.
+      const a2 = 1 - a0 - a1;
+      let lo = 0, hi = maxX - minX;
+      if (dw0 > 0) lo = Math.max(lo, Math.ceil((eps - a0) / dw0) - 1);
+      else if (dw0 < 0) hi = Math.min(hi, Math.floor((eps - a0) / dw0) + 1);
+      else if (a0 < eps) continue;
+      if (dw1 > 0) lo = Math.max(lo, Math.ceil((eps - a1) / dw1) - 1);
+      else if (dw1 < 0) hi = Math.min(hi, Math.floor((eps - a1) / dw1) + 1);
+      else if (a1 < eps) continue;
+      if (dw2 > 0) lo = Math.max(lo, Math.ceil((eps - a2) / dw2) - 1);
+      else if (dw2 < 0) hi = Math.min(hi, Math.floor((eps - a2) / dw2) + 1);
+      else if (a2 < eps) continue;
+      for (let u = lo, row = py * W + minX + lo; u <= hi; u++, row++) {
+        const w0 = a0 + u * dw0, w1 = a1 + u * dw1, w2 = 1 - w0 - w1;
         if (w0 < eps || w1 < eps || w2 < eps) continue;
         const z = w0 * z0 + w1 * z1 + w2 * z2;
         if (z > zbuf[row]) {
@@ -311,6 +325,11 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
         }
       }
     }
+  };
+  for (let t = 0; t < nt; t++) {
+    const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+    if (!valid[a] || !valid[b] || !valid[c]) continue;
+    fill(t, sx[a], sy[a], dk[a], sx[b], sy[b], dk[b], sx[c], sy[c], dk[c]);
   }
 
   // --- Colour + outlines ------------------------------------------------------

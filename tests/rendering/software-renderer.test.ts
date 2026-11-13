@@ -138,6 +138,24 @@ describe("software renderer overlays", () => {
   });
 });
 
+describe("software renderer rasterising", () => {
+  it("does not slow down on long thin triangles", () => {
+    // 4000 cap triangles, each a sliver from the centre to the rim. Filling their whole bounding
+    // boxes made this about 30× slower than a 64-sided cylinder of the same size; it is now about 4×.
+    const view = { width: 512, height: 512, camera: parseView("top"), projection: "orthographic" as const };
+    const median = (mesh: Mesh) => {
+      const times = [0, 1, 2].map(() => {
+        const start = performance.now();
+        renderMesh(mesh, view);
+        return performance.now() - start;
+      });
+      return times.sort((a, b) => a - b)[1];
+    };
+    const coarse = median(cylinder(50, 2, 64));
+    expect(median(cylinder(50, 2, 4000)) / coarse).toBeLessThan(12);
+  });
+});
+
 describe("software renderer orientation", () => {
   const mesh = lShape(); // red bar along X, blue 30 mm tower at +X, nub along +Y at -X
 
