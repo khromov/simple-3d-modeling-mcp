@@ -26,6 +26,16 @@ describe("parseView", () => {
     expect(() => parseView("0,0,0,55,0,25,-50")).toThrow(/must be positive/);
   });
 
+  it("accepts only plain decimal numbers", () => {
+    expect(parseView(" 55 , 0 , 25 ")).toEqual({ kind: "fit", rot: [55, 0, 25] });
+    expect(parseView("-5.5,+3,.5")).toEqual({ kind: "fit", rot: [-5.5, 3, 0.5] });
+    expect(parseView("1e1,0,25")).toEqual({ kind: "fit", rot: [10, 0, 25] });
+    // Number() reads "" as 0 and accepts hex and Infinity; a view string must not.
+    for (const view of ["55,,25", ",,", "0x37,0,25", "Infinity,0,0", "55,0,25,", "1e400,0,0"]) {
+      expect(() => parseView(view), view).toThrow(/Invalid view/);
+    }
+  });
+
   it("rejects garbage with a helpful message", () => {
     expect(() => parseView("sideways")).toThrow(/Use a preset/);
     expect(() => parseView("1,2")).toThrow(/2 numbers/);

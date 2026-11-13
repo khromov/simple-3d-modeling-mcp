@@ -59,13 +59,19 @@ export const VIEW_HELP =
   `a preset (${VIEW_NAMES.join(", ")}, iso), three rotation angles "rx,ry,rz" (auto-framed), ` +
   `an OpenSCAD gimbal camera "tx,ty,tz,rx,ry,rz,distance", or a vector camera "eyeX,eyeY,eyeZ,centerX,centerY,centerZ"`;
 
+const DECIMAL = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+
 export function parseView(view?: string): CameraSpec {
   if (!view || !view.trim()) return { kind: "fit", rot: [...PRESET_VIEWS.perspective] };
   const preset = resolvePreset(view);
   if (preset) return { kind: "fit", rot: [...PRESET_VIEWS[preset]] };
 
-  const nums = view.split(",").map((s) => Number(s.trim()));
-  if (nums.some((n) => !Number.isFinite(n))) throw new UserError(`Invalid view "${view}". Use ${VIEW_HELP}.`);
+  // Plain decimal numbers only: Number() would also take "" (as 0), hex and "Infinity".
+  const parts = view.split(",").map((s) => s.trim());
+  const nums = parts.map(Number);
+  if (parts.some((p) => !DECIMAL.test(p)) || nums.some((n) => !Number.isFinite(n))) {
+    throw new UserError(`Invalid view "${view}". Use ${VIEW_HELP}.`);
+  }
   switch (nums.length) {
     case 3:
       return { kind: "fit", rot: [nums[0], nums[1], nums[2]] };
