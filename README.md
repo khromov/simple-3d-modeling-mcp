@@ -191,7 +191,11 @@ devcontainer up --workspace-folder .
 devcontainer exec --workspace-folder . npm test
 ```
 
-Creating the container runs `npm ci && npm run build`, which needs network to download the OpenSCAD WASM build and BOSL2. After that `npm test`, `npm run typecheck`, `npm run dev:viewer` (port 5173 is forwarded) and the MCP server (`node dist/index.js`) work as-is. The live viewer opened by the server listens on a random `127.0.0.1` port that VS Code forwards when it appears; no browser opens by itself inside the container, so open the forwarded URL.
+Creating the container runs `npm ci && npm run build`, which needs network to download the OpenSCAD WASM build and BOSL2. After that `npm test`, `npm run typecheck`, `npm run build:mcpb`, `npm run dev:viewer` and the MCP server (`node dist/index.js`) work as-is.
+
+- VS Code forwards port 5173 (`npm run dev:viewer`). The devcontainer CLI forwards no ports, so open it from inside the container or use VS Code.
+- The live viewer started by the MCP server listens on a random `127.0.0.1` port, and no browser opens by itself inside the container. VS Code offers to forward the port when it appears. The viewer only accepts a `localhost` or `127.0.0.1` Host on that same port number, so it works when VS Code forwards it to the same local port, but not on a different local port or on a Codespaces `*.app.github.dev` URL. The `npm run dev:viewer` page also needs a `localhost` URL, though any port works.
+- Exports go to `~/Downloads` inside the container. Set `OPENSCAD_OUTPUT_DIR` to a folder under `/workspaces` to see them on the host.
 
 ### Releasing
 
