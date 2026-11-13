@@ -140,6 +140,12 @@ describe("MCP server", () => {
     expect(imageOf(r)!.includes(Buffer.from("acTL"))).toBe(true);
   });
 
+  it("render_turntable views from below, and rejects negative elevations", async () => {
+    const small = { code: "cube(5);", frames: 4, width: 128, height: 128 };
+    expect((await call("render_turntable", { ...small, elevation: 125 })).isError).toBeFalsy();
+    expect((await call("render_turntable", { ...small, elevation: -55 })).isError).toBe(true);
+  });
+
   it("rejects cameras without a direction", async () => {
     const r = await call("render", { code: "cube(1);", view: "1,1,1,1,1,1" });
     expect(r.isError).toBe(true);

@@ -363,7 +363,12 @@ export function createServer(opts: CreateServerOptions): AppServer {
         frames: z.number().int().min(4).max(72).optional().describe("Number of frames (default 24)"),
         width: z.number().int().min(128).max(1024).optional().describe("Image width (default 512)"),
         height: z.number().int().min(128).max(1024).optional().describe("Image height (default 512)"),
-        elevation: z.number().min(-90).max(90).optional().describe("Camera tilt from the top view in degrees (default 55)"),
+        elevation: z
+          .number()
+          .min(0)
+          .max(180)
+          .optional()
+          .describe("Camera tilt from the top view in degrees: 0 looks straight down, 90 from the side, over 90 from below (default 55)"),
         params: paramsSchema,
         title: titleSchema,
       }),
