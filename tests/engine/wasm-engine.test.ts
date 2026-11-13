@@ -64,6 +64,13 @@ describe("WasmEngine", () => {
     expect(computeStats(r.mesh!).size[0]).toBeGreaterThan(5);
   });
 
+  it("loads fonts when only a bundled library calls text()", async () => {
+    // BOSL2's debug_region() labels vertices with text(); the user's code never mentions text or fonts.
+    const r = await engine.computeMesh(src("include <BOSL2/std.scad>\ndebug_region([square(10)]);"));
+    expect(r.ok).toBe(true);
+    expect(r.log.warnings.filter((w) => /Can't get font/.test(w))).toEqual([]);
+  });
+
   it("keeps echoed strings with newlines whole", async () => {
     const r = await engine.validate(src('echo("first\\nsecond"); cube(1);')); // OpenSCAD's \n escape
     expect(r.log.echo).toEqual(['"first\nsecond"']);

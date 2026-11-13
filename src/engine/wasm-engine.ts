@@ -190,6 +190,7 @@ export class WasmEngine extends BaseEngine {
     for (const extra of job.extraFiles ?? []) files.push({ path: posix.join(workDir, extra.name), data: extra.data });
 
     const args = [mainPath, ...(job.args ?? []), ...paramArgs(job.params), "-o", outputPath];
+    const libraries = this.libraries.filter((name) => corpus.includes(name));
     const timeoutMs = Math.min(job.timeoutMs ?? Infinity, this.timeoutMs);
 
     let reply: WorkerReply;
@@ -199,8 +200,9 @@ export class WasmEngine extends BaseEngine {
           args,
           files,
           outputPath,
-          fonts: /text|font/i.test(corpus),
-          libraries: this.libraries.filter((name) => corpus.includes(name)),
+          // Bundled libraries call text() themselves (e.g. BOSL2's debug labels), and their sources aren't in the corpus.
+          fonts: libraries.length > 0 || /text|font/i.test(corpus),
+          libraries,
         },
         timeoutMs,
       );
