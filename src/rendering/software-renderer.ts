@@ -326,11 +326,40 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
       }
     }
   };
-  for (let t = 0; t < nt; t++) {
+  /**
+   * Fills face t. In perspective, a face that reaches behind the near plane
+   * (a camera close to or inside the model) is clipped there and its part in
+   * front filled, instead of being dropped.
+   */
+  const draw = (t: number) => {
     const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
-    if (!valid[a] || !valid[b] || !valid[c]) continue;
-    fill(t, sx[a], sy[a], dk[a], sx[b], sy[b], dk[b], sx[c], sy[c], dk[c]);
-  }
+    if (valid[a] && valid[b] && valid[c]) {
+      fill(t, sx[a], sy[a], dk[a], sx[b], sy[b], dk[b], sx[c], sy[c], dk[c]);
+      return;
+    }
+    if (ortho) return;
+    // Sutherland–Hodgman against w = near in eye space (w: distance in front
+    // of the eye). The result has 3 or 4 corners: screen x, y and depth key each.
+    const pts: number[] = [];
+    const corner = (x: number, y: number, wv: number) => {
+      const nx = ((x * fovScale) / (aspect * wv)) * post.sx + post.ox;
+      const ny = ((y * fovScale) / wv) * post.sy + post.oy;
+      pts.push((nx + 1) * 0.5 * W, (1 - ny) * 0.5 * H, 1 / wv);
+    };
+    for (let k = 0; k < 3; k++) {
+      const p = idx[t * 3 + k], q = idx[t * 3 + ((k + 1) % 3)];
+      const pw = dist - ez[p], qw = dist - ez[q];
+      if (pw > near) corner(ex[p], ey[p], pw);
+      if ((pw > near) !== (qw > near)) {
+        const s = (near - pw) / (qw - pw);
+        corner(ex[p] + s * (ex[q] - ex[p]), ey[p] + s * (ey[q] - ey[p]), near);
+      }
+    }
+    for (let k = 3; k + 3 < pts.length; k += 3) {
+      fill(t, pts[0], pts[1], pts[2], pts[k], pts[k + 1], pts[k + 2], pts[k + 3], pts[k + 4], pts[k + 5]);
+    }
+  };
+  for (let t = 0; t < nt; t++) draw(t);
 
   // --- Colour + outlines ------------------------------------------------------
   const rgb = new Uint8Array(W * H * 3);

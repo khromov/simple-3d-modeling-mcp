@@ -154,6 +154,22 @@ describe("software renderer rasterising", () => {
     const coarse = median(cylinder(50, 2, 64));
     expect(median(cylinder(50, 2, 4000)) / coarse).toBeLessThan(12);
   });
+
+  it("clips faces at the near plane instead of dropping them", () => {
+    // A camera 23 mm above a 200 mm plate: the plate's two big top triangles reach behind the
+    // camera, and dropping them left the bottom of the image empty.
+    const plate = box([0, 0, 0], [200, 200, 2]);
+    const img = renderMesh(plate, { width: 200, height: 150, camera: parseView("40,40,25,100,100,5"), projection: "perspective", axes: false });
+    let background = 0, pixels = 0;
+    for (let y = 100; y < 150; y++) {
+      for (let x = 0; x < 200; x++) {
+        const i = (y * 200 + x) * 4;
+        pixels++;
+        if (!notBackground(img.rgba[i], img.rgba[i + 1], img.rgba[i + 2])) background++;
+      }
+    }
+    expect(background / pixels).toBeLessThan(0.01);
+  });
 });
 
 describe("software renderer orientation", () => {
