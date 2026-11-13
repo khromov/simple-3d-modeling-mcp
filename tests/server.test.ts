@@ -140,6 +140,12 @@ describe("MCP server", () => {
     expect(imageOf(r)!.includes(Buffer.from("acTL"))).toBe(true);
   });
 
+  it("rejects cameras without a direction", async () => {
+    const r = await call("render", { code: "cube(1);", view: "1,1,1,1,1,1" });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/the eye and the center are the same point/);
+  });
+
   it("exports to the output folder without overwriting", async () => {
     const code = 'color("red") cube(10);';
     const a = await call("export", { code, format: "3mf", title: "Red cube" });

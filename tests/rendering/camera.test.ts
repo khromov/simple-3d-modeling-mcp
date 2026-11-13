@@ -20,6 +20,12 @@ describe("parseView", () => {
     expect(parseView("100,100,100,0,0,0")).toEqual({ kind: "vector", eye: [100, 100, 100], center: [0, 0, 0] });
   });
 
+  it("rejects cameras without a direction or a distance", () => {
+    expect(() => parseView("15,12.5,15,15,12.5,15")).toThrow(/the eye and the center are the same point/);
+    expect(() => parseView("0,0,0,55,0,25,0")).toThrow(/the distance \(the last number\) must be positive/);
+    expect(() => parseView("0,0,0,55,0,25,-50")).toThrow(/must be positive/);
+  });
+
   it("rejects garbage with a helpful message", () => {
     expect(() => parseView("sideways")).toThrow(/Use a preset/);
     expect(() => parseView("1,2")).toThrow(/2 numbers/);
