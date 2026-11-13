@@ -172,6 +172,33 @@ describe("software renderer rasterising", () => {
   });
 });
 
+describe("software renderer transparency", () => {
+  /** A box whose colour has the given alpha. */
+  const tinted = (min: [number, number, number], max: [number, number, number], color: [number, number, number], alpha: number) => {
+    const mesh = box(min, max, color);
+    mesh.colors!.forEach((_, i, c) => {
+      if (i % 4 === 3) c[i] = alpha;
+    });
+    return mesh;
+  };
+  const isBlue: Pred = (r, g, b) => b > 90 && b > r + 30 && g < 80;
+
+  it("shows what is inside a transparent part", () => {
+    const inner = box([-7, -7, -7], [7, 7, 7], [0, 0, 255]);
+    const blueSeen = (alpha: number) => {
+      const shell = tinted([-20, -20, -20], [20, 20, 20], [255, 0, 0], alpha);
+      return bboxOf(renderMesh(merge(shell, inner), { ...SIZE, axes: false }), isBlue).count;
+    };
+    expect(blueSeen(255)).toBe(0); // an opaque shell hides the blue box…
+    expect(blueSeen(76)).toBeGreaterThan(500); // …a 30% one shows it, tinted
+  });
+
+  it("does not draw fully transparent faces", () => {
+    const img = renderMesh(tinted([0, 0, 0], [10, 10, 10], [255, 0, 0], 0), { ...SIZE, axes: false });
+    expect(bboxOf(img, notBackground).count).toBe(0);
+  });
+});
+
 describe("software renderer orientation", () => {
   const mesh = lShape(); // red bar along X, blue 30 mm tower at +X, nub along +Y at -X
 

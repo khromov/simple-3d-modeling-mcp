@@ -278,15 +278,30 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
   }
 
   // --- Rasterise --------------------------------------------------------------
+  // Faces with an explicit colour whose alpha is below 255 are transparent:
+  // they are blended over the opaque faces after those are drawn.
+  const alpha = new Uint8Array(nt).fill(255);
+  if (colors) {
+    for (let t = 0; t < nt; t++) {
+      if (!isDefaultColor(colors[t * 4], colors[t * 4 + 1], colors[t * 4 + 2])) alpha[t] = colors[t * 4 + 3];
+    }
+  }
   const zbuf = new Float32Array(W * H).fill(-Infinity);
   const fid = new Int32Array(W * H).fill(-1);
+  const rgb = new Uint8Array(W * H * 3);
+  // Nearest transparent face per pixel (in front of the opaque surface), for its outlines.
+  let tzbuf = new Float32Array(0), tfid = new Int32Array(0);
   /**
-   * Fills a screen-space triangle of face t, keeping the nearest face per
-   * pixel. Each row visits only the columns between the triangle's edges, not
-   * its whole bounding box, which long thin triangles (fine cylinder caps)
-   * would make many times larger than the triangle.
+   * Fills a screen-space triangle of face t. Opaque faces (opacity 1) keep the
+   * nearest face per pixel; transparent ones blend their colour into rgb
+   * wherever they are in front of the opaque surface. Each row visits only
+   * the columns between the triangle's edges, not its whole bounding box,
+   * which long thin triangles (fine cylinder caps) would make many times
+   * larger than the triangle.
    */
-  const fill = (t: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) => {
+  const fill = (
+    t: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x2: number, y2: number, z2: number, opacity: number,
+  ) => {
     const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
     if (Math.abs(area) < 1e-12) return;
     const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
@@ -319,9 +334,19 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
         const w0 = a0 + u * dw0, w1 = a1 + u * dw1, w2 = 1 - w0 - w1;
         if (w0 < eps || w1 < eps || w2 < eps) continue;
         const z = w0 * z0 + w1 * z1 + w2 * z2;
-        if (z > zbuf[row]) {
+        if (z <= zbuf[row]) continue;
+        if (opacity === 1) {
           zbuf[row] = z;
           fid[row] = t;
+          continue;
+        }
+        const o = row * 3;
+        rgb[o] += (shade[t * 3] - rgb[o]) * opacity;
+        rgb[o + 1] += (shade[t * 3 + 1] - rgb[o + 1]) * opacity;
+        rgb[o + 2] += (shade[t * 3 + 2] - rgb[o + 2]) * opacity;
+        if (z > tzbuf[row]) {
+          tzbuf[row] = z;
+          tfid[row] = t;
         }
       }
     }
@@ -331,10 +356,10 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
    * (a camera close to or inside the model) is clipped there and its part in
    * front filled, instead of being dropped.
    */
-  const draw = (t: number) => {
+  const draw = (t: number, opacity: number) => {
     const a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
     if (valid[a] && valid[b] && valid[c]) {
-      fill(t, sx[a], sy[a], dk[a], sx[b], sy[b], dk[b], sx[c], sy[c], dk[c]);
+      fill(t, sx[a], sy[a], dk[a], sx[b], sy[b], dk[b], sx[c], sy[c], dk[c], opacity);
       return;
     }
     if (ortho) return;
@@ -356,13 +381,12 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
       }
     }
     for (let k = 3; k + 3 < pts.length; k += 3) {
-      fill(t, pts[0], pts[1], pts[2], pts[k], pts[k + 1], pts[k + 2], pts[k + 3], pts[k + 4], pts[k + 5]);
+      fill(t, pts[0], pts[1], pts[2], pts[k], pts[k + 1], pts[k + 2], pts[k + 3], pts[k + 4], pts[k + 5], opacity);
     }
   };
-  for (let t = 0; t < nt; t++) draw(t);
+  for (let t = 0; t < nt; t++) if (alpha[t] === 255) draw(t, 1);
 
   // --- Colour + outlines ------------------------------------------------------
-  const rgb = new Uint8Array(W * H * 3);
   for (let i = 0; i < W * H; i++) {
     const f = fid[i];
     const o = i * 3;
@@ -373,9 +397,14 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
     }
   }
 
-  if (opts.edges !== false && nt > 0) {
+  /**
+   * Outlines the faces in `ids` (nearest face per pixel, with its depth key in
+   * `depth`): silhouettes, creases and steps. Outline pixels are darkened to
+   * `keep` of their colour, or lightened on dark faces.
+   */
+  const outline = (ids: Int32Array, depth: Float32Array, keep: number) => {
     const mask = new Uint8Array(W * H);
-    const lin = (i: number) => (ortho ? -zbuf[i] : 1 / zbuf[i]);
+    const lin = (i: number) => (ortho ? -depth[i] : 1 / depth[i]);
     const depthTol = sceneR * 0.04;
     const planeTol = sceneR * 0.002;
     // Depth (along the view axis) where the ray through supersampled pixel
@@ -404,7 +433,7 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
       return Math.min(Math.abs(da), Math.abs(db)) > planeTol;
     };
     const check = (i: number, j: number, ax: number, ay: number, bx: number, by: number) => {
-      const f = fid[i], g = fid[j];
+      const f = ids[i], g = ids[j];
       if (f === g) return;
       if (f < 0 || g < 0) {
         mask[f < 0 ? j : i] = 1; // silhouette: darken the model side
@@ -429,9 +458,25 @@ export function renderMesh(mesh: Mesh, opts: RenderOptions): RenderedImage {
       if (Math.max(rgb[o], rgb[o + 1], rgb[o + 2]) < DARK_EDGE_VALUE) {
         for (let k = 0; k < 3; k++) rgb[o + k] = (rgb[o + k] + LIGHT_EDGE[k]) / 2;
       } else {
-        rgb[o] = rgb[o] * 0.4; rgb[o + 1] = rgb[o + 1] * 0.4; rgb[o + 2] = rgb[o + 2] * 0.4;
+        rgb[o] = rgb[o] * keep; rgb[o + 1] = rgb[o + 1] * keep; rgb[o + 2] = rgb[o + 2] * keep;
       }
     }
+  };
+  const edges = opts.edges !== false && nt > 0;
+  if (edges) outline(fid, zbuf, 0.4);
+
+  // --- Transparent faces --------------------------------------------------------
+  // Blended back to front (sorted by eye-space depth; +Z points at the viewer),
+  // then outlined a little more lightly so a transparent part's shape reads.
+  const clear: number[] = [];
+  for (let t = 0; t < nt; t++) if (alpha[t] > 0 && alpha[t] < 255) clear.push(t);
+  if (clear.length > 0) {
+    tzbuf = new Float32Array(W * H).fill(-Infinity);
+    tfid = new Int32Array(W * H).fill(-1);
+    const depthOf = (t: number) => ez[idx[t * 3]] + ez[idx[t * 3 + 1]] + ez[idx[t * 3 + 2]];
+    clear.sort((p, q) => depthOf(p) - depthOf(q));
+    for (const t of clear) draw(t, alpha[t] / 255);
+    if (edges) outline(tfid, tzbuf, 0.6);
   }
 
   // --- Overlays (drawn supersampled, so they get anti-aliased too) ----------
