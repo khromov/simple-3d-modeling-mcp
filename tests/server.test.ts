@@ -108,6 +108,12 @@ describe("MCP server", () => {
     expect(textOf(empty)).toMatch(/top level object is empty[\s\S]*Hint: The model produced no geometry/);
   });
 
+  it("hints at bundled libraries when an include is missing", async () => {
+    const r = await call("render", { code: "include <MCAD/boxes.scad>\nroundedBox([10, 10, 10], 2, true);" });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/Can't find include file 'MCAD\/boxes\.scad'[\s\S]*Hint: Relative paths only resolve when rendering with `file`\. Bundled libraries: BOSL2/);
+  });
+
   it("validates inputs", async () => {
     expect(textOf(await call("render", { code: "cube(1);", view: "sideways" }))).toMatch(/Invalid view/);
     expect(textOf(await call("render", {}))).toMatch(/Provide OpenSCAD source/);

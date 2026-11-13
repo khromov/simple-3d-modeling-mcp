@@ -160,7 +160,7 @@ function hintsFor(log: EngineLog): string[] {
     hints.push("The model produced no geometry — e.g. difference() removed everything, every object is disabled with *, or a module is defined but never called.");
   }
   if (/parser error/i.test(all)) hints.push("Check for a missing semicolon, bracket or comma at or just before that line.");
-  if (/can't open (include|library|import)|can't open file/i.test(all)) {
+  if (/can't (open|find) (include|library|import)|can't open file/i.test(all)) {
     hints.push(`Relative paths only resolve when rendering with \`file\`. Bundled libraries: ${bundledLibraries().join(", ") || "none"} (e.g. include <BOSL2/std.scad>).`);
   }
   if (/timed out/i.test(all)) hints.push("Simplify the model or lower $fn; minkowski() and high $fn are common culprits.");
