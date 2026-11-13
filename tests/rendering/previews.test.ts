@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { textWidth } from "../../src/rendering/bitmap-font.js";
 import { ApngWriter, decodePng, encodeApng, encodePng } from "../../src/rendering/png.js";
 import { composeGrid, renderMultiView, renderTurntable, TurntableTooLargeError } from "../../src/rendering/previews.js";
 import { bboxOf, centroid, type Pred } from "../helpers/image.js";
@@ -39,6 +40,25 @@ describe("previews", () => {
     const img = decodePng(r.png);
     expect([img.width, img.height]).toEqual([128 * 2 + 2, 96 * 2 + 2]);
     expect(r.layout).toBe("row 1 col 1: front (ortho); row 1 col 2: right (ortho); row 2 col 1: top (ortho); row 2 col 2: perspective");
+  });
+
+  it("keeps the model out from under each cell's title", () => {
+    // A tall tower in 128 px cells used to run up under "FRONT (ORTHO)".
+    const tower = box([0, 0, 0], [10, 10, 40]);
+    const img = decodePng(renderMultiView(tower, { views: ["front", "right"], cellWidth: 128, cellHeight: 128 }).png);
+    // The title "FRONT (ORTHO)" / "RIGHT (ORTHO)" sits at (8, 8): 7 px tall at this cell size.
+    const titleW = 8 + textWidth("front (ortho)", 1), titleH = 8 + 7;
+    for (const cell of [0, 1]) {
+      const x0 = cell * 130; // 128 px cells with a 2 px gap
+      let model = 0;
+      for (let y = 0; y < titleH; y++) {
+        for (let x = x0; x < x0 + titleW; x++) {
+          const i = (y * img.width + x) * 4;
+          if (img.rgba[i] > 60 && img.rgba[i] > img.rgba[i + 1] + 30 && img.rgba[i + 2] < 60) model++;
+        }
+      }
+      expect(model, `cell ${cell}`).toBe(0);
+    }
   });
 
   it("lays out up to six cells in three columns", () => {

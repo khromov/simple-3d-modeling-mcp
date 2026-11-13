@@ -26,6 +26,16 @@ describe("parseView", () => {
     expect(() => parseView("0,0,0,55,0,25,-50")).toThrow(/must be positive/);
   });
 
+  it("accepts only plain decimal numbers", () => {
+    expect(parseView(" 55 , 0 , 25 ")).toEqual({ kind: "fit", rot: [55, 0, 25] });
+    expect(parseView("-5.5,+3,.5")).toEqual({ kind: "fit", rot: [-5.5, 3, 0.5] });
+    expect(parseView("1e1,0,25")).toEqual({ kind: "fit", rot: [10, 0, 25] });
+    // Number() reads "" as 0 and accepts hex and Infinity; a view string must not.
+    for (const view of ["55,,25", ",,", "0x37,0,25", "Infinity,0,0", "55,0,25,", "1e400,0,0"]) {
+      expect(() => parseView(view), view).toThrow(/Invalid view/);
+    }
+  });
+
   it("rejects garbage with a helpful message", () => {
     expect(() => parseView("sideways")).toThrow(/Use a preset/);
     expect(() => parseView("1,2")).toThrow(/2 numbers/);
@@ -63,6 +73,15 @@ describe("gimbalMatrix (OpenSCAD conventions)", () => {
     const m = lookAtMatrix([0, -10, 0], [0, 0, 0]); // same as the front view
     expect(round(applyMat(m, 0, 0, 1))).toEqual([0, 1, 0]);
     expect(round(applyMat(m, 0, 1, 0))).toEqual([0, 0, -1]);
+  });
+
+  it("keeps a vector camera steady close to straight down", () => {
+    // 7 mm and 9 mm off-axis, 185 mm up: the image used to flip 180° between the two.
+    const screenUp = (eyeY: number) => lookAtMatrix([0, eyeY, 185], [0, 0, 0]).slice(3, 6);
+    const [a, b] = [screenUp(7), screenUp(9)];
+    expect(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).toBeGreaterThan(0.999);
+    // Exactly straight down still shows +Y up, as the top view does.
+    expect(round(applyMat(lookAtMatrix([0, 0, 50], [0, 0, 0]), 0, 1, 0))).toEqual([0, 1, 0]);
   });
 });
 
