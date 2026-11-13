@@ -1,0 +1,55 @@
+name: Dev container
+
+on:
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "viewer/package.json"
+      - ".nvmrc"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  devcontainer:
+    name: build and test in the dev container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install the devcontainer CLI
+        run: npm install -g @devcontainers/cli@0.90.0
+
+      # Builds the image with its features and runs postCreateCommand (npm ci && npm run build).
+      - name: devcontainer up
+        run: devcontainer up --workspace-folder .
+
+      - name: Type-check
+        run: devcontainer exec --workspace-folder . npm run typecheck
+
+      - name: Test (Node)
+        run: devcontainer exec --workspace-folder . npm test
+
+      - name: Test (Bun runtime)
+        run: devcontainer exec --workspace-folder . bun --bun vitest run --exclude tests/package-manifest.test.ts
+
+      - name: MCP stdio smoke test
+        run: devcontainer exec --workspace-folder . node scripts/capture-mcp-traffic.mjs /tmp/mcp-traffic.json
+
+      - name: MCP stdio smoke test (server running under Bun)
+        run: devcontainer exec --workspace-folder . bun scripts/capture-mcp-traffic.mjs /tmp/mcp-traffic-bun.json
+
+      - name: Build the .mcpb bundle
+        run: devcontainer exec --workspace-folder . npm run build:mcpb
