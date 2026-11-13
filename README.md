@@ -21,7 +21,7 @@ Published on npm as `sketchpad-3d-model-mcp` (formerly `@khromov/simple-3d-model
 - **Real error messages** — OpenSCAD's own errors (with line numbers) plus hints, so the AI can fix its code.
 - **Multi-view grids** — labelled front / right / top (orthographic) + perspective views in one image.
 - **Turntable animations** — 360° animated previews for the user.
-- **Colours** — `color()` shows up in previews, the viewer and 3MF exports.
+- **Colours** — `color()` shows up in previews, the viewer and 3MF exports. Previews also show transparency, as in `color("red", 0.3)`.
 - **BOSL2 and `text()`** — `include <BOSL2/std.scad>` and `text("…")` work out of the box.
 - **Live browser viewer** — rotate/zoom/pan, model history, dimensions, STL/3MF download, open in your slicer. Runs locally, works offline.
 - **Real files** — export STL, 3MF, OBJ, OFF (and SVG/DXF for 2D designs) to a folder you choose; save and render `.scad` files with relative `include`/`use`.

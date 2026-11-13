@@ -24,7 +24,7 @@ check them against what the user asked for.
 ## Transformations
   translate([x, y, z])   rotate([x, y, z])   // degrees
   scale([x, y, z])       mirror([x, y, z])    multmatrix(m)
-  color("name"|"#rrggbb"|[r,g,b,a])          // shown in previews and kept in 3MF exports
+  color("name"|"#rrggbb"|[r,g,b,a])          // shown in previews and kept in 3MF exports; alpha < 1 is see-through in previews (a part inside a solid is merged away: hollow the outer part to see inside)
   offset(r|delta, chamfer)   hull()   minkowski()   resize([x, y, z], auto)
 
 ## Boolean Operations
